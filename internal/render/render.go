@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
+	"time"
 
 	"ccmagotchi/internal/config"
 	"ccmagotchi/internal/face"
@@ -33,8 +34,9 @@ func petLine(cfg config.Config) string {
 	if err != nil {
 		n = state.Now{Activity: "idle"}
 	}
-	line := face.Pick(n)
-	if n.Remark != nil && n.Remark.Text != "" {
+	talking := n.Remark != nil && n.Remark.Text != ""
+	line := face.Pick(n, time.Now().Unix(), talking) // frame = wall-clock second → ambient animation
+	if talking {
 		line += " " + n.Remark.Text
 	}
 	return line
