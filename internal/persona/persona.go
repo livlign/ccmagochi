@@ -26,9 +26,9 @@ func Default() Persona {
 		LongThinkingMs: 20000,
 		ManyFiles:      8,
 		SameFileRepeat: 5,
-		IdleSeconds:    600, // a long thinking turn writes nothing to the transcript;
-		// don't call silence "idle" until ~10min (else the pet sleeps mid-turn).
-		// Precise active/idle needs the hook heartbeat — see worklog v1.4 note.
+		IdleSeconds:    300, // fallback silence threshold when no hook heartbeat.
+		// With the heartbeat (v1.5), turnActive handles in-turn silence and idle
+		// becomes responsive (~60s) post-turn; this 300s only guards no-hook sessions.
 		RemarkCap:      5,
 		CooldownTurns:  8,
 		RecencyWindow:  20,

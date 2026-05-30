@@ -124,13 +124,28 @@ func (d *Daemon) Tick() {
 		d.m.Tiredness = mood.Tiredness(d.sessionStart, nowMs, now.Hour())
 	}
 
+	// real-time turn signal from the hook heartbeat (v1.5): a turn can be active
+	// while the transcript is silent (long thinking) — don't call that idle.
+	hb, _ := state.ReadHeartbeat(d.cfg.HeartbeatPath())
+	hbFresh := hb.Event != "" && nowMs-hb.TS < 15*60*1000
+	turnActive := hbFresh && isActiveEvent(hb.Event)
+	if hb.Tool != "" && nowMs-hb.TS < 10000 {
+		d.lastTool = hb.Tool // freshest tool, straight from the hook
+	}
+	idleMs := d.p.IdleSeconds * 1000 // fallback when no hooks
+	if hbFresh {
+		idleMs = 60 * 1000 // hooks present → idle responsive post-turn
+	}
+
 	act := "idle"
 	switch {
 	case d.cls.OpenAgents() > 0:
 		act = "delegating"
 	case d.cls.OpenTools() > 0:
 		act = "tool_running"
-	case nowMs-d.lastEventTS > d.p.IdleSeconds*1000:
+	case turnActive:
+		act = "thinking" // a turn is in progress — never sleep here
+	case nowMs-d.lastEventTS > idleMs:
 		act = "idle"
 	default:
 		act = "thinking"
@@ -223,6 +238,16 @@ func acquireLock(path string) bool {
 	}
 	_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	return true
+}
+
+// isActiveEvent reports whether a hook event means a turn is in progress
+// (vs. Stop/Notification/SessionEnd which mean the turn ended / awaiting user).
+func isActiveEvent(e string) bool {
+	switch e {
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart":
+		return true
+	}
+	return false
 }
 
 // EnsureRunning is called by the renderer: spawn a detached daemon if none is alive.

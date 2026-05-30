@@ -4,10 +4,50 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"ccmagotchi/internal/config"
 	"ccmagotchi/internal/state"
 )
+
+func TestIsActiveEvent(t *testing.T) {
+	for _, e := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
+		if !isActiveEvent(e) {
+			t.Errorf("%s should be active", e)
+		}
+	}
+	for _, e := range []string{"Stop", "Notification", "SessionEnd", ""} {
+		if isActiveEvent(e) {
+			t.Errorf("%s should NOT be active", e)
+		}
+	}
+}
+
+// The hook heartbeat keeps the pet "thinking" during transcript silence
+// (the long-thinking-turn sleep bug, fixed for real).
+func TestTick_HeartbeatBeatsSilence(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	stale := time.Now().UnixMilli() - 10*60*1000 // 10 min of transcript silence
+
+	// no heartbeat → silence reads as idle
+	d := New(cfg)
+	d.lastEventTS = stale
+	d.Tick()
+	if n, _ := state.ReadNow(cfg.NowPath()); n.Activity != "idle" {
+		t.Fatalf("without heartbeat, long silence should be idle, got %q", n.Activity)
+	}
+
+	// active heartbeat → same silence is "thinking", not idle
+	state.WriteHeartbeat(cfg.HeartbeatPath(), state.Heartbeat{TS: time.Now().UnixMilli(), Event: "UserPromptSubmit"})
+	d2 := New(cfg)
+	d2.lastEventTS = stale
+	d2.Tick()
+	if n, _ := state.ReadNow(cfg.NowPath()); n.Activity != "thinking" {
+		t.Fatalf("active heartbeat should keep thinking during silence, got %q", n.Activity)
+	}
+}
 
 // The daemon attaches at end-of-file: it must SKIP pre-existing backlog, then
 // react to NEW activity appended after attach. Tick() is the testable unit.

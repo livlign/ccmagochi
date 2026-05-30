@@ -81,6 +81,29 @@ func ReadSession(path string) (Session, error) {
 	return s, json.Unmarshal(b, &s)
 }
 
+// Heartbeat is written by the `ccmagotchi hook` subcommand on Claude Code
+// lifecycle events — a real-time active/idle signal the transcript can't give
+// (a long thinking turn writes nothing until it completes).
+type Heartbeat struct {
+	TS    int64  `json:"ts"`
+	Event string `json:"event"` // UserPromptSubmit | PreToolUse | PostToolUse | Stop | ...
+	Tool  string `json:"tool"`  // tool name on PreToolUse (else "")
+}
+
+func WriteHeartbeat(path string, h Heartbeat) error {
+	b, _ := json.Marshal(h)
+	return os.WriteFile(path, b, 0o644)
+}
+
+func ReadHeartbeat(path string) (Heartbeat, error) {
+	var h Heartbeat
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return h, err
+	}
+	return h, json.Unmarshal(b, &h)
+}
+
 // AppendRemarked logs an emitted remark (repetition avoidance + later analysis).
 func AppendRemarked(path, trigger, text string, ts int64) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
