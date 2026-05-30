@@ -1,0 +1,9 @@
+# build output
+/bin/
+
+# go
+*.out
+*.test
+
+# os
+.DS_Store
