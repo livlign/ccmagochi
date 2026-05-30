@@ -18,22 +18,24 @@ type View struct {
 	LocalHour     int
 	JustDelegated bool
 	// v1.6 dev events (instantaneous — true only on the tick they happen)
-	JustCommitted bool
-	JustReverted  bool
-	JustTestPass  bool
-	JustTestFail  bool
-	IsEditing     bool // currently editing files → "on it, editing N files"
-	IsWeekend     bool // Fri/Sat/Sun → "weekend's coming"
+	JustCommitted    bool
+	JustReverted     bool
+	JustTestPass     bool
+	JustTestFail     bool
+	IsEditing        bool // currently editing files → "on it, editing N files"
+	IsWeekend        bool // Fri/Sat/Sun → "weekend's coming"
+	JustFavoriteFile bool // touched a new file of its favorite kind → cheeky
+	JustAversion     bool // ran its pet-peeve tool → mild grumble
 }
 
 type Engine struct {
-	p          persona.Persona
-	vocab      persona.Vocab
-	recent     []string       // recent remark texts (repetition avoidance)
-	count      int            // remarks this session
-	lastTurn   map[string]int // category -> turn it last fired
-	turn       int
-	rng        *rand.Rand
+	p        persona.Persona
+	vocab    persona.Vocab
+	recent   []string       // recent remark texts (repetition avoidance)
+	count    int            // remarks this session
+	lastTurn map[string]int // category -> turn it last fired
+	turn     int
+	rng      *rand.Rand
 }
 
 func NewEngine(p persona.Persona, vocab persona.Vocab, recent []string, seed int64) *Engine {
@@ -56,6 +58,8 @@ func (e *Engine) Eval(v View) (string, string) {
 		{"commit", v.JustCommitted},
 		{"test_pass", v.JustTestPass},
 		{"revert", v.JustReverted},
+		{"favorite_file", v.JustFavoriteFile},
+		{"aversion", v.JustAversion},
 		{"editing", v.IsEditing},
 		{"long_thinking", v.ThinkMaxMs > e.p.LongThinkingMs},
 		{"long_tool_call", v.ToolMaxMs > e.p.LongToolCallMs},

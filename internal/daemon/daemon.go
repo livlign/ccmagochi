@@ -14,6 +14,7 @@ import (
 	"ccmagotchi/internal/events"
 	"ccmagotchi/internal/mood"
 	"ccmagotchi/internal/persona"
+	"ccmagotchi/internal/quirks"
 	"ccmagotchi/internal/state"
 	"ccmagotchi/internal/transcript"
 	"ccmagotchi/internal/triggers"
@@ -45,6 +46,8 @@ type Daemon struct {
 	eventFaceExp  int64
 	lastCommitMs  int64 // for "revert soon after commit → skeptical"
 	revertStreak  int   // consecutive reverts (no commit between) → disapproving
+	quirks        quirks.Quirks
+	remarkCount   int // for the speech-tic cadence
 	lastTick      time.Time
 }
 
@@ -57,6 +60,7 @@ func New(cfg config.Config) *Daemon {
 		p:           p,
 		eng:         triggers.NewEngine(p, vocab, state.RecentRemarks(cfg.RemarkedPath(), p.RecencyWindow), time.Now().UnixNano()),
 		cls:         transcript.NewClassifier(),
+		quirks:      quirks.Load(cfg.QuirksPath()),
 		m:           state.Mood{Energy: 0.7},
 		seenFiles:   map[string]bool{},
 		fileRepeat:  map[string]int{},
@@ -78,6 +82,7 @@ func (d *Daemon) Tick() {
 
 	justDelegated, errFlash, doneFlash := false, false, false
 	justCommitted, justReverted, justTestPass, justTestFail := false, false, false, false
+	favoriteFile, aversionHit := false, false
 	newEventFace := ""
 	if d.tailer != nil {
 		for _, line := range d.tailer.ReadNew() {
@@ -106,6 +111,10 @@ func (d *Daemon) Tick() {
 				case "tool_call":
 					if name, ok := e.Data["name"].(string); ok {
 						d.lastTool = name
+						if name == d.quirks.Aversion {
+							aversionHit = true
+							d.m.Stress = clampUnit(d.m.Stress + 0.1)
+						}
 					}
 					if f, ok := e.Data["file"].(string); ok && f != "" {
 						d.fileRepeat[f]++
@@ -113,6 +122,9 @@ func (d *Daemon) Tick() {
 							d.seenFiles[f] = true
 							d.filesCount++
 							mood.BumpCuriosity(&d.m, 0.2)
+							if strings.HasSuffix(f, d.quirks.FavoriteExt) {
+								favoriteFile = true
+							}
 						}
 					}
 				case "subagent_spawn":
@@ -193,11 +205,22 @@ func (d *Daemon) Tick() {
 			LocalHour: now.Hour(), JustDelegated: justDelegated,
 			JustCommitted: justCommitted, JustReverted: justReverted,
 			JustTestPass: justTestPass, JustTestFail: justTestFail,
-			IsEditing: act == "tool_running" && isEditTool(d.lastTool),
-			IsWeekend: isWeekend(now.Weekday()),
+			IsEditing:        act == "tool_running" && isEditTool(d.lastTool),
+			IsWeekend:        isWeekend(now.Weekday()),
+			JustFavoriteFile: favoriteFile,
+			JustAversion:     aversionHit,
 		}); text != "" {
-			if strings.Contains(text, "%d") {
+			switch {
+			case strings.Contains(text, "%s") && cat == "favorite_file":
+				text = fmt.Sprintf(text, d.quirks.FavoriteExt)
+			case strings.Contains(text, "%s") && cat == "aversion":
+				text = fmt.Sprintf(text, d.quirks.Aversion)
+			case strings.Contains(text, "%d"):
 				text = fmt.Sprintf(text, d.filesCount)
+			}
+			d.remarkCount++ // speech tic ~1 in 3 remarks (its verbal fingerprint)
+			if d.quirks.SpeechTic != "" && d.remarkCount%3 == 0 {
+				text += d.quirks.SpeechTic
 			}
 			d.curRemark = &state.Remark{Text: text, ExpiresMs: nowMs + d.p.RemarkHoldMs}
 			state.AppendRemarked(d.cfg.RemarkedPath(), cat, text, nowMs)
@@ -215,6 +238,9 @@ func (d *Daemon) Tick() {
 		d.flashTone, d.flashExpires = "success", nowMs+3000
 	}
 	// transient dev-event face (skeptical/disapproving/satisfied)
+	if favoriteFile && newEventFace == "" {
+		newEventFace = "cheeky" // a new file of its favorite kind
+	}
 	if newEventFace != "" {
 		d.eventFace, d.eventFaceExp = newEventFace, nowMs+8000
 	}

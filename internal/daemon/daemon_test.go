@@ -131,6 +131,29 @@ func TestTick_SurfacesLastTool(t *testing.T) {
 	}
 }
 
+// Touching a new file of the pet's favorite extension → cheeky reaction.
+func TestTick_FavoriteFileCheeky(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	os.WriteFile(cfg.QuirksPath(), []byte(`{"favorite_ext":".go","speech_tic":"!","aversion":"Grep","seeded":true}`), 0o644)
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
+
+	d := New(cfg)
+	d.Tick() // attach at end
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","timestamp":"2026-05-31T00:00:01.000Z","message":{"content":[{"type":"tool_use","id":"e","name":"Edit","input":{"file_path":"/x/main.go"}}]}}` + "\n")
+	f.Close()
+
+	d.Tick()
+	n, _ := state.ReadNow(cfg.NowPath())
+	if n.EventFace != "cheeky" {
+		t.Errorf("new .go file (the favorite) → cheeky, got %q", n.EventFace)
+	}
+}
+
 // Mood starts neutral on attach (no cold-replay spike).
 func TestTick_StartsNeutral(t *testing.T) {
 	tmp := t.TempDir()

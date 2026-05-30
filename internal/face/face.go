@@ -68,6 +68,8 @@ func hue(n state.Now) string {
 		return "yellow" // wary
 	case "satisfied":
 		return "green"
+	case "cheeky":
+		return "magenta" // playful
 	default: // sleepy/exhausted/bored/neutral
 		return "grey"
 	}
@@ -218,6 +220,8 @@ func facialFrame(n state.Now, expr string, tick int64, talking bool) (l, mouth, 
 		return "ಠ", "_", "ಠ"
 	case "satisfied":
 		return "˘", "_", "˘"
+	case "cheeky":
+		return "ᗒ", "_", "ᗕ"
 	case "sleepy":
 		if tick%90 < 2 { // occasional yawn
 			return "O", "_", "o"

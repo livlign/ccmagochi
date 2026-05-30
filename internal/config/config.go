@@ -42,6 +42,7 @@ func (c Config) SessionPath() string  { return filepath.Join(c.StateDir, "sessio
 func (c Config) RemarkedPath() string { return filepath.Join(c.StateDir, "remarked.log") }
 func (c Config) LockPath() string      { return filepath.Join(c.StateDir, "daemon.lock") }
 func (c Config) HeartbeatPath() string { return filepath.Join(c.StateDir, "heartbeat.json") }
+func (c Config) QuirksPath() string    { return filepath.Join(c.dir(), "quirks.json") }
 func (c Config) PersonaPath() string  { return filepath.Join(c.dir(), "persona.json") }
 func (c Config) VocabPath() string    { return filepath.Join(c.dir(), "vocab.json") }
 

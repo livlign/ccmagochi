@@ -196,6 +196,9 @@ func TestEventFace_DevReactions(t *testing.T) {
 	if l, _, _ := facialFrame(state.Now{}, "satisfied", 1, false); l != "˘" {
 		t.Error("satisfied → ˘_˘")
 	}
+	if l, _, r := facialFrame(state.Now{}, "cheeky", 1, false); l != "ᗒ" || r != "ᗕ" {
+		t.Error("cheeky → ᗒ_ᗕ")
+	}
 	// satisfied gets the milestone habitat
 	if _, r := habitat(state.Now{EventFace: "satisfied"}, "satisfied"); r != " ✦" {
 		t.Errorf("satisfied → milestone ✦, got %q", r)

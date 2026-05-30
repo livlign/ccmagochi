@@ -30,10 +30,10 @@ func Default() Persona {
 		// With the heartbeat (v1.5), turnActive handles in-turn silence and idle
 		// becomes responsive (~60s) post-turn; this 300s only guards no-hook sessions.
 		// v1.6 — talkative (overrides idea.md "silence is default"; tune in persona.json):
-		RemarkCap:      40,
-		CooldownTurns:  3,
-		RecencyWindow:  20,
-		RemarkHoldMs:   7000,
+		RemarkCap:     40,
+		CooldownTurns: 3,
+		RecencyWindow: 20,
+		RemarkHoldMs:  7000,
 	}
 }
 
@@ -59,6 +59,9 @@ func DefaultVocab() Vocab {
 		"editing":          {"On it — editing %d files…", "Heads down, %d files in flight…", "Working through %d files…", "Editing away — %d so far…"},
 		"busy":             {"Whew, that's a lot of work!", "Big day today, huh?", "We're cooking — lots going on!", "Lots of moving parts today!"},
 		"weekend":          {"Weekend's almost here — any plans?", "Friday vibes! Wrapping up?", "Weekend's coming — got plans?", "Almost the weekend!"},
+		// quirks (v1.7)
+		"favorite_file": {"Ooh, a %s file — love these!", "%s, my favorite!", "Ah, a %s. nice.", "A %s? yes please."},
+		"aversion":      {"Ugh, %s again.", "Not %s…", "%s? if we must.", "oh, %s. fine."},
 		// dev events
 		"commit":    {"Shipped! Nice one.", "Committed — clean!", "Another one in the books!", "Saved! git's happy.", "Locked it in!", "Boom — committed!"},
 		"revert":    {"Oops — taking that back.", "Undo. It happens!", "Reverting — no harm.", "Scrapping that one.", "Rewind!", "That one didn't make it."},
