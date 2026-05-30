@@ -50,17 +50,20 @@ type Vocab map[string][]string
 
 func DefaultVocab() Vocab {
 	return Vocab{
-		"long_tool_call":   {"that one's taking its time.", "still chewing on that call.", "long call — patience.", "slow one.", "this tool's gone quiet.", "waiting on that."},
-		"long_thinking":    {"deep in thought.", "a long pause. weighing something.", "quiet for a while there.", "thinking hard.", "mulling it over.", "taking its time to answer."},
-		"many_files":       {"a lot of files open today.", "you've touched a dozen things this session.", "casting a wide net.", "lots of moving parts.", "spread across the codebase.", "busy everywhere at once."},
-		"late_hour":        {"late.", "the small hours, still here.", "past your usual, by the clock.", "the night shift.", "burning the midnight oil.", "should you be asleep?"},
-		"same_file_repeat": {"back in this file again.", "third pass on the same spot.", "this one keeps pulling you back.", "you and this file.", "round and round here.", "can't quit this one."},
-		"delegating":       {"sent a helper off.", "delegating — nice.", "handed that one off.", "a subagent's on it.", "outsourced.", "let someone else dig."},
-		// v1.6 dev events
-		"commit":    {"shipped.", "committed — clean.", "another one in the books.", "saved for posterity.", "git's pleased.", "that's locked in."},
-		"revert":    {"taking it back.", "undo. fair enough.", "reverting — happens.", "scrapping that.", "rewinding.", "that didn't survive."},
-		"test_pass": {"green.", "tests pass — nice.", "all green.", "clean run.", "passing.", "no complaints from the suite."},
-		"test_fail": {"red.", "tests are unhappy.", "something broke.", "the suite's complaining.", "failing.", "back to it."},
+		"long_tool_call":   {"Hmm, that's taking a while…", "Still on that one…", "Patience — long call.", "This tool's deep in it.", "Hang tight…", "Chewing on that…"},
+		"long_thinking":    {"Ooh, tough one — thinking…", "That's a hard question, let me think…", "Hmm, mulling this over…", "Deep thoughts here…", "Give me a sec…", "Thinking hard on this…"},
+		"many_files":       {"Whew, that's a lot today!", "Lots of files in flight!", "Busy everywhere at once!", "So many things going on!", "Big session, huh?", "We're all over the place!"},
+		"late_hour":        {"It's late — still going?", "The small hours… night owl.", "Past bedtime, by the clock!", "Burning the midnight oil!", "Late-night coding, I see.", "Should we call it soon?"},
+		"same_file_repeat": {"Back in this file again!", "You and this file, huh?", "Round and round here…", "This one keeps calling you back.", "Third time's the charm?", "Can't quit this file!"},
+		"delegating":       {"Sent a helper off!", "Delegating — smart.", "A subagent's on it!", "Outsourced that one.", "Help is on the way!", "Letting someone else dig in…"},
+		"editing":          {"On it — editing %d files…", "Heads down, %d files in flight…", "Working through %d files…", "Editing away — %d so far…"},
+		"busy":             {"Whew, that's a lot of work!", "Big day today, huh?", "We're cooking — lots going on!", "Lots of moving parts today!"},
+		"weekend":          {"Weekend's almost here — any plans?", "Friday vibes! Wrapping up?", "Weekend's coming — got plans?", "Almost the weekend!"},
+		// dev events
+		"commit":    {"Shipped! Nice one.", "Committed — clean!", "Another one in the books!", "Saved! git's happy.", "Locked it in!", "Boom — committed!"},
+		"revert":    {"Oops — taking that back.", "Undo. It happens!", "Reverting — no harm.", "Scrapping that one.", "Rewind!", "That one didn't make it."},
+		"test_pass": {"Yay — all green!", "Tests pass! Nice.", "All green, woo!", "Clean run!", "Passing — love it.", "Green across the board!"},
+		"test_fail": {"Oops! Something broke.", "Tests are unhappy…", "Red. Back to it!", "Something's off…", "The suite's complaining.", "Uh oh — failing."},
 	}
 }
 

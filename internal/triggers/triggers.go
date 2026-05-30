@@ -22,6 +22,8 @@ type View struct {
 	JustReverted  bool
 	JustTestPass  bool
 	JustTestFail  bool
+	IsEditing     bool // currently editing files → "on it, editing N files"
+	IsWeekend     bool // Fri/Sat/Sun → "weekend's coming"
 }
 
 type Engine struct {
@@ -54,10 +56,13 @@ func (e *Engine) Eval(v View) (string, string) {
 		{"commit", v.JustCommitted},
 		{"test_pass", v.JustTestPass},
 		{"revert", v.JustReverted},
-		{"long_tool_call", v.ToolMaxMs > e.p.LongToolCallMs},
+		{"editing", v.IsEditing},
 		{"long_thinking", v.ThinkMaxMs > e.p.LongThinkingMs},
+		{"long_tool_call", v.ToolMaxMs > e.p.LongToolCallMs},
 		{"same_file_repeat", v.MaxFileRepeat >= e.p.SameFileRepeat},
+		{"busy", v.FilesCount >= 10},
 		{"many_files", v.FilesCount >= e.p.ManyFiles},
+		{"weekend", v.IsWeekend},
 		{"late_hour", v.LocalHour < 5 || v.LocalHour >= 23},
 		{"delegating", v.JustDelegated},
 	}

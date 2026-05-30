@@ -209,8 +209,13 @@ func TestPosture_Celebrating(t *testing.T) {
 }
 
 func TestPick_WrapsColorReset(t *testing.T) {
-	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, false)
+	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, "")
 	if !strings.HasSuffix(out, reset) || !strings.Contains(out, "•") {
 		t.Errorf("expected colored face ending in reset, got %q", out)
+	}
+	// a remark is rendered INSIDE the color span (before reset) → same color
+	withR := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, "hello there")
+	if !strings.HasSuffix(withR, "hello there"+reset) {
+		t.Errorf("remark should sit inside the color span, got %q", withR)
 	}
 }

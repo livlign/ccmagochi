@@ -34,12 +34,11 @@ func petLine(cfg config.Config) string {
 	if err != nil {
 		n = state.Now{Activity: "idle"}
 	}
-	talking := n.Remark != nil && n.Remark.Text != ""
-	line := face.Pick(n, time.Now().Unix(), talking) // frame = wall-clock second → ambient animation
-	if talking {
-		line += " " + n.Remark.Text
+	remark := ""
+	if n.Remark != nil {
+		remark = n.Remark.Text
 	}
-	return line
+	return face.Pick(n, time.Now().Unix(), remark) // remark rendered in the pet's color
 }
 
 // baseLines runs the user's existing statusLine command (if any), piping the

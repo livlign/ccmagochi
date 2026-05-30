@@ -85,7 +85,7 @@ func sgr(h string, energy float64) string {
 	table := map[string][3]string{
 		"grey":    {"\x1b[2;37m", "\x1b[90m", "\x1b[37m"},
 		"green":   {"\x1b[2;32m", "\x1b[32m", "\x1b[92m"},
-		"teal":    {"\x1b[2;36m", "\x1b[36m", "\x1b[96m"},
+		"teal":    {"\x1b[38;5;23m", "\x1b[38;5;30m", "\x1b[38;5;37m"}, // real teal, distinct from cyan
 		"red":     {"\x1b[2;31m", "\x1b[31m", "\x1b[91m"},
 		"yellow":  {"\x1b[2;33m", "\x1b[33m", "\x1b[93m"},
 		"blue":    {"\x1b[2;34m", "\x1b[34m", "\x1b[94m"},
@@ -253,8 +253,10 @@ func facialFrame(n state.Now, expr string, tick int64, talking bool) (l, mouth, 
 }
 
 // Pick composes the full animated, colored pet for the current state at tick
-// (wall-clock seconds). talking = a remark is currently shown.
-func Pick(n state.Now, tick int64, talking bool) string {
+// (wall-clock seconds). remark != "" means the pet is speaking; the text is
+// rendered INSIDE the color span so it matches the pet's color.
+func Pick(n state.Now, tick int64, remark string) string {
+	talking := remark != ""
 	expr := Expression(n)
 	lb, rb := posture(n, tick)
 	l, mouth, r := facialFrame(n, expr, tick, talking)
@@ -262,9 +264,10 @@ func Pick(n state.Now, tick int64, talking bool) string {
 	if acc := accessory(n); acc != "" {
 		body += " " + acc
 	}
-	// habitat decoration (suppressed during a remark)
-	if !talking {
-		hl, hr := habitat(n, expr)
+	if talking {
+		body += " " + remark // inside the color span → same color as the pet
+	} else {
+		hl, hr := habitat(n, expr) // habitat suppressed during a remark
 		body = hl + body + hr
 	}
 	col := sgr(hue(n), n.Mood.Energy)

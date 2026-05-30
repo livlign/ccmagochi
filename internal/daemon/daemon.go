@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -20,26 +21,26 @@ import (
 
 // Daemon holds the streaming state. Tick() is the unit of work (one tick).
 type Daemon struct {
-	cfg          config.Config
-	p            persona.Persona
-	eng          *triggers.Engine
-	cls          *transcript.Classifier
-	tailer       *transcript.Tailer
-	curPath      string
-	m            state.Mood
-	sessionStart int64
-	seenFiles    map[string]bool
-	fileRepeat   map[string]int
-	toolMaxMs    int64
-	thinkMaxMs   int64
-	filesCount   int
-	lastEventTS  int64
+	cfg           config.Config
+	p             persona.Persona
+	eng           *triggers.Engine
+	cls           *transcript.Classifier
+	tailer        *transcript.Tailer
+	curPath       string
+	m             state.Mood
+	sessionStart  int64
+	seenFiles     map[string]bool
+	fileRepeat    map[string]int
+	toolMaxMs     int64
+	thinkMaxMs    int64
+	filesCount    int
+	lastEventTS   int64
 	curRemark     *state.Remark
 	flashTone     string // "error"|"success" transient color, with expiry
 	flashExpires  int64
 	lastTool      string // last tool name seen (for the edit/read accessory)
 	prevActivity  string
-	activitySince int64 // ms when the current activity began (for habitat gating)
+	activitySince int64  // ms when the current activity began (for habitat gating)
 	eventFace     string // transient dev-event reaction (skeptical/disapproving/satisfied)
 	eventFaceExp  int64
 	lastCommitMs  int64 // for "revert soon after commit → skeptical"
@@ -190,9 +191,14 @@ func (d *Daemon) Tick() {
 			ToolMaxMs: d.toolMaxMs, ThinkMaxMs: d.thinkMaxMs,
 			FilesCount: d.filesCount, MaxFileRepeat: maxRepeat,
 			LocalHour: now.Hour(), JustDelegated: justDelegated,
-				JustCommitted: justCommitted, JustReverted: justReverted,
-				JustTestPass: justTestPass, JustTestFail: justTestFail,
+			JustCommitted: justCommitted, JustReverted: justReverted,
+			JustTestPass: justTestPass, JustTestFail: justTestFail,
+			IsEditing: act == "tool_running" && isEditTool(d.lastTool),
+			IsWeekend: isWeekend(now.Weekday()),
 		}); text != "" {
+			if strings.Contains(text, "%d") {
+				text = fmt.Sprintf(text, d.filesCount)
+			}
 			d.curRemark = &state.Remark{Text: text, ExpiresMs: nowMs + d.p.RemarkHoldMs}
 			state.AppendRemarked(d.cfg.RemarkedPath(), cat, text, nowMs)
 			d.toolMaxMs, d.thinkMaxMs = 0, 0 // one-shot maxes don't re-trip
@@ -241,6 +247,18 @@ func (d *Daemon) Tick() {
 		StateHeldMs: stateHeld, LastTool: d.lastTool, OpenToolMs: openToolMs,
 		EventFace: d.eventFace, Remark: d.curRemark,
 	})
+}
+
+func isEditTool(name string) bool {
+	switch name {
+	case "Edit", "Write", "MultiEdit", "NotebookEdit":
+		return true
+	}
+	return false
+}
+
+func isWeekend(d time.Weekday) bool {
+	return d == time.Friday || d == time.Saturday || d == time.Sunday
 }
 
 func clampUnit(v float64) float64 {
