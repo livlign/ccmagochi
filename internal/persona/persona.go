@@ -22,17 +22,18 @@ type Persona struct {
 
 func Default() Persona {
 	return Persona{
-		LongToolCallMs: 30000,
-		LongThinkingMs: 20000,
-		ManyFiles:      8,
-		SameFileRepeat: 5,
+		LongToolCallMs: 30000, // kept high so warnings stay sane
+		LongThinkingMs: 12000,
+		ManyFiles:      4,
+		SameFileRepeat: 3,
 		IdleSeconds:    300, // fallback silence threshold when no hook heartbeat.
 		// With the heartbeat (v1.5), turnActive handles in-turn silence and idle
 		// becomes responsive (~60s) post-turn; this 300s only guards no-hook sessions.
-		RemarkCap:      5,
-		CooldownTurns:  8,
+		// v1.6 — talkative (overrides idea.md "silence is default"; tune in persona.json):
+		RemarkCap:      40,
+		CooldownTurns:  3,
 		RecencyWindow:  20,
-		RemarkHoldMs:   15000,
+		RemarkHoldMs:   7000,
 	}
 }
 
@@ -49,12 +50,17 @@ type Vocab map[string][]string
 
 func DefaultVocab() Vocab {
 	return Vocab{
-		"long_tool_call":   {"that one's taking its time.", "still chewing on that call.", "long call — patience."},
-		"long_thinking":    {"deep in thought.", "a long pause. weighing something.", "quiet for a while there."},
-		"many_files":       {"a lot of files open today.", "you've touched a dozen things this session.", "casting a wide net."},
-		"late_hour":        {"late.", "the small hours, still here.", "past your usual, by the clock."},
-		"same_file_repeat": {"back in this file again.", "third pass on the same spot.", "this one keeps pulling you back."},
-		"delegating":       {"sent a helper off.", "delegating — nice.", "handed that one off."},
+		"long_tool_call":   {"that one's taking its time.", "still chewing on that call.", "long call — patience.", "slow one.", "this tool's gone quiet.", "waiting on that."},
+		"long_thinking":    {"deep in thought.", "a long pause. weighing something.", "quiet for a while there.", "thinking hard.", "mulling it over.", "taking its time to answer."},
+		"many_files":       {"a lot of files open today.", "you've touched a dozen things this session.", "casting a wide net.", "lots of moving parts.", "spread across the codebase.", "busy everywhere at once."},
+		"late_hour":        {"late.", "the small hours, still here.", "past your usual, by the clock.", "the night shift.", "burning the midnight oil.", "should you be asleep?"},
+		"same_file_repeat": {"back in this file again.", "third pass on the same spot.", "this one keeps pulling you back.", "you and this file.", "round and round here.", "can't quit this one."},
+		"delegating":       {"sent a helper off.", "delegating — nice.", "handed that one off.", "a subagent's on it.", "outsourced.", "let someone else dig."},
+		// v1.6 dev events
+		"commit":    {"shipped.", "committed — clean.", "another one in the books.", "saved for posterity.", "git's pleased.", "that's locked in."},
+		"revert":    {"taking it back.", "undo. fair enough.", "reverting — happens.", "scrapping that.", "rewinding.", "that didn't survive."},
+		"test_pass": {"green.", "tests pass — nice.", "all green.", "clean run.", "passing.", "no complaints from the suite."},
+		"test_fail": {"red.", "tests are unhappy.", "something broke.", "the suite's complaining.", "failing.", "back to it."},
 	}
 }
 

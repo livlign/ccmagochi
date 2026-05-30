@@ -182,6 +182,26 @@ func TestFacialFrame_DistinctiveEyes(t *testing.T) {
 	}
 }
 
+func TestEventFace_DevReactions(t *testing.T) {
+	// EventFace overrides activity/mood (a salient dev reaction)
+	if Expression(state.Now{EventFace: "skeptical", Activity: "tool_running"}) != "skeptical" {
+		t.Error("EventFace should win over activity")
+	}
+	if l, _, _ := facialFrame(state.Now{}, "skeptical", 1, false); l != "¬" {
+		t.Error("skeptical → ¬_¬")
+	}
+	if l, _, _ := facialFrame(state.Now{}, "disapproving", 1, false); l != "ಠ" {
+		t.Error("disapproving → ಠ_ಠ")
+	}
+	if l, _, _ := facialFrame(state.Now{}, "satisfied", 1, false); l != "˘" {
+		t.Error("satisfied → ˘_˘")
+	}
+	// satisfied gets the milestone habitat
+	if _, r := habitat(state.Now{EventFace: "satisfied"}, "satisfied"); r != " ✦" {
+		t.Errorf("satisfied → milestone ✦, got %q", r)
+	}
+}
+
 func TestPosture_Celebrating(t *testing.T) {
 	if l, r := posture(state.Now{Tone: "success"}, 1); l != "\\" || r != "/" {
 		t.Errorf("success → celebrating \\ /, got %q %q", l, r)

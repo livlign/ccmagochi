@@ -20,6 +20,8 @@ func Expression(n state.Now) string {
 	switch {
 	case n.Tone == "error":
 		return "alarmed"
+	case n.EventFace != "": // dev-event reaction (skeptical/disapproving/satisfied)
+		return n.EventFace
 	case n.Activity == "delegating":
 		return "delegating"
 	case n.Activity == "tool_running":
@@ -62,6 +64,10 @@ func hue(n state.Now) string {
 		return "cyan"
 	case "alarmed", "distressed":
 		return "red"
+	case "skeptical", "disapproving":
+		return "yellow" // wary
+	case "satisfied":
+		return "green"
 	default: // sleepy/exhausted/bored/neutral
 		return "grey"
 	}
@@ -172,6 +178,9 @@ func habitat(n state.Now, expr string) (left, right string) {
 	if n.Tone == "error" {
 		return "", " !!" // alarm (event-driven, no sustain needed)
 	}
+	if expr == "satisfied" {
+		return "✦ ", " ✦" // milestone — a test passed / shipped
+	}
 	if n.StateHeldMs < 30000 {
 		return "", "" // sustained-only
 	}
@@ -203,6 +212,12 @@ func facialFrame(n state.Now, expr string, tick int64, talking bool) (l, mouth, 
 		return ">", "_", "<"
 	case "exhausted":
 		return "x", "_", "x"
+	case "skeptical":
+		return "¬", "_", "¬"
+	case "disapproving":
+		return "ಠ", "_", "ಠ"
+	case "satisfied":
+		return "˘", "_", "˘"
 	case "sleepy":
 		if tick%90 < 2 { // occasional yawn
 			return "O", "_", "o"

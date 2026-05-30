@@ -17,6 +17,11 @@ type View struct {
 	MaxFileRepeat int
 	LocalHour     int
 	JustDelegated bool
+	// v1.6 dev events (instantaneous — true only on the tick they happen)
+	JustCommitted bool
+	JustReverted  bool
+	JustTestPass  bool
+	JustTestFail  bool
 }
 
 type Engine struct {
@@ -44,6 +49,11 @@ func (e *Engine) Eval(v View) (string, string) {
 		cat string
 		ok  bool
 	}{
+		// dev events first — they're the most salient, react immediately
+		{"test_fail", v.JustTestFail},
+		{"commit", v.JustCommitted},
+		{"test_pass", v.JustTestPass},
+		{"revert", v.JustReverted},
 		{"long_tool_call", v.ToolMaxMs > e.p.LongToolCallMs},
 		{"long_thinking", v.ThinkMaxMs > e.p.LongThinkingMs},
 		{"same_file_repeat", v.MaxFileRepeat >= e.p.SameFileRepeat},

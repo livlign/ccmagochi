@@ -32,6 +32,7 @@ type Now struct {
 	StateHeldMs int64   `json:"state_held_ms"` // how long Activity has been stable (habitat gating)
 	LastTool    string  `json:"last_tool"`     // last tool name (Edit/Read/Bash/Agent/...) for accessory
 	OpenToolMs  int64   `json:"open_tool_ms"`  // age of oldest open tool (warning escalation)
+	EventFace   string  `json:"event_face"`    // transient dev-event reaction: skeptical|disapproving|satisfied|""
 	Remark      *Remark `json:"remark"`
 }
 

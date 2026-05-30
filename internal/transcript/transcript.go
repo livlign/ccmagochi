@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"ccmagotchi/internal/events"
@@ -53,6 +54,26 @@ func str(v any) string {
 type toolInfo struct {
 	name string
 	ts   int64
+	cmd  string // Bash command (for commit/revert/test detection)
+}
+
+// dev-event detection from Bash command strings (v1.6)
+func isCommit(cmd string) bool { return strings.Contains(cmd, "git commit") }
+func isRevert(cmd string) bool {
+	for _, p := range []string{"git revert", "git restore", "git reset", "git checkout -- ", "git checkout ."} {
+		if strings.Contains(cmd, p) {
+			return true
+		}
+	}
+	return false
+}
+func isTestCmd(cmd string) bool {
+	for _, p := range []string{"go test", "npm test", "npm run test", "yarn test", "pnpm test", "pytest", "jest", "vitest", "cargo test", "rspec", "phpunit", "dotnet test"} {
+		if strings.Contains(cmd, p) {
+			return true
+		}
+	}
+	return false
 }
 
 type Classifier struct {
@@ -94,15 +115,23 @@ func (c *Classifier) Classify(line []byte) []events.Event {
 				}
 			case "tool_use":
 				if b.Name == "Agent" {
-					c.openTools[b.ID] = toolInfo{"Agent", ts}
+					c.openTools[b.ID] = toolInfo{"Agent", ts, ""}
 					emit("subagent_spawn", map[string]any{"subagent_type": str(b.Input["subagent_type"])})
 				} else {
-					c.openTools[b.ID] = toolInfo{b.Name, ts}
+					cmd := str(b.Input["command"]) // Bash
+					c.openTools[b.ID] = toolInfo{b.Name, ts, cmd}
 					d := map[string]any{"name": b.Name}
 					if f := str(b.Input["file_path"]); f != "" {
 						d["file"] = f
 					}
 					emit("tool_call", d)
+					if b.Name == "Bash" { // dev events from the command itself
+						if isCommit(cmd) {
+							emit("commit", nil)
+						} else if isRevert(cmd) {
+							emit("revert", nil)
+						}
+					}
 				}
 			}
 		}
@@ -126,6 +155,14 @@ func (c *Classifier) Classify(line []byte) []events.Event {
 				emit("subagent_done", map[string]any{"duration_ms": dur})
 			default:
 				emit("tool_done", map[string]any{"duration_ms": dur, "name": info.name})
+			}
+			// test pass/fail from a Bash test command (exit code ≈ is_error)
+			if ok && info.name == "Bash" && isTestCmd(info.cmd) {
+				if b.IsError {
+					emit("test_fail", nil)
+				} else {
+					emit("test_pass", nil)
+				}
 			}
 		}
 		if !sawToolResult {

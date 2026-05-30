@@ -28,6 +28,53 @@ func TestClassify_FullFlow(t *testing.T) {
 	}
 }
 
+func TestClassify_DevEvents(t *testing.T) {
+	bashTypes := func(cmd string) []string {
+		c := NewClassifier()
+		var types []string
+		for _, e := range c.Classify([]byte(`{"type":"assistant","timestamp":"2026-05-31T00:00:00.000Z","message":{"content":[{"type":"tool_use","id":"b","name":"Bash","input":{"command":"` + cmd + `"}}]}}`)) {
+			types = append(types, e.Type)
+		}
+		return types
+	}
+	if !contains(bashTypes("git commit -m x"), "commit") {
+		t.Error("git commit → commit event")
+	}
+	if !contains(bashTypes("git restore ."), "revert") {
+		t.Error("git restore → revert event")
+	}
+
+	// test pass/fail from the result's is_error flag (exit code proxy)
+	resultTypes := func(cmd string, isErr bool) []string {
+		c := NewClassifier()
+		c.Classify([]byte(`{"type":"assistant","timestamp":"2026-05-31T00:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t","name":"Bash","input":{"command":"` + cmd + `"}}]}}`))
+		errField := ""
+		if isErr {
+			errField = `,"is_error":true`
+		}
+		var types []string
+		for _, e := range c.Classify([]byte(`{"type":"user","timestamp":"2026-05-31T00:00:05.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t"` + errField + `}]}}`)) {
+			types = append(types, e.Type)
+		}
+		return types
+	}
+	if !contains(resultTypes("go test ./...", false), "test_pass") {
+		t.Error("clean test result → test_pass")
+	}
+	if !contains(resultTypes("pytest", true), "test_fail") {
+		t.Error("errored test result → test_fail")
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestClassify_IgnoresMeta(t *testing.T) {
 	c := NewClassifier()
 	for _, mt := range []string{"mode", "permission-mode", "ai-title", "last-prompt", "attachment"} {

@@ -40,6 +40,10 @@ type Daemon struct {
 	lastTool      string // last tool name seen (for the edit/read accessory)
 	prevActivity  string
 	activitySince int64 // ms when the current activity began (for habitat gating)
+	eventFace     string // transient dev-event reaction (skeptical/disapproving/satisfied)
+	eventFaceExp  int64
+	lastCommitMs  int64 // for "revert soon after commit → skeptical"
+	revertStreak  int   // consecutive reverts (no commit between) → disapproving
 	lastTick      time.Time
 }
 
@@ -72,6 +76,8 @@ func (d *Daemon) Tick() {
 	}
 
 	justDelegated, errFlash, doneFlash := false, false, false
+	justCommitted, justReverted, justTestPass, justTestFail := false, false, false, false
+	newEventFace := ""
 	if d.tailer != nil {
 		for _, line := range d.tailer.ReadNew() {
 			for _, e := range d.cls.Classify(line) {
@@ -111,6 +117,25 @@ func (d *Daemon) Tick() {
 				case "subagent_spawn":
 					d.lastTool = "Agent"
 					justDelegated = true
+				case "commit":
+					justCommitted = true
+					d.lastCommitMs = e.TS
+					d.revertStreak = 0
+					d.m.Affection = clampUnit(d.m.Affection + 0.4)
+				case "revert":
+					justReverted = true
+					d.revertStreak++
+					if d.revertStreak >= 2 {
+						newEventFace = "disapproving"
+					} else {
+						newEventFace = "skeptical"
+					}
+				case "test_pass":
+					justTestPass = true
+					newEventFace = "satisfied"
+				case "test_fail":
+					justTestFail = true
+					d.m.Stress = clampUnit(d.m.Stress + 0.3)
 				}
 			}
 		}
@@ -165,6 +190,8 @@ func (d *Daemon) Tick() {
 			ToolMaxMs: d.toolMaxMs, ThinkMaxMs: d.thinkMaxMs,
 			FilesCount: d.filesCount, MaxFileRepeat: maxRepeat,
 			LocalHour: now.Hour(), JustDelegated: justDelegated,
+				JustCommitted: justCommitted, JustReverted: justReverted,
+				JustTestPass: justTestPass, JustTestFail: justTestFail,
 		}); text != "" {
 			d.curRemark = &state.Remark{Text: text, ExpiresMs: nowMs + d.p.RemarkHoldMs}
 			state.AppendRemarked(d.cfg.RemarkedPath(), cat, text, nowMs)
@@ -178,8 +205,15 @@ func (d *Daemon) Tick() {
 	}
 	if errFlash {
 		d.flashTone, d.flashExpires = "error", nowMs+5000
-	} else if doneFlash && d.flashTone != "error" {
+	} else if (doneFlash || justCommitted || justTestPass) && d.flashTone != "error" {
 		d.flashTone, d.flashExpires = "success", nowMs+3000
+	}
+	// transient dev-event face (skeptical/disapproving/satisfied)
+	if newEventFace != "" {
+		d.eventFace, d.eventFaceExp = newEventFace, nowMs+8000
+	}
+	if d.eventFace != "" && nowMs > d.eventFaceExp {
+		d.eventFace = ""
 	}
 	tone := d.flashTone
 	if tone == "" {
@@ -205,8 +239,18 @@ func (d *Daemon) Tick() {
 	state.WriteNow(d.cfg.NowPath(), state.Now{
 		Mood: d.m, Activity: act, Tone: tone,
 		StateHeldMs: stateHeld, LastTool: d.lastTool, OpenToolMs: openToolMs,
-		Remark: d.curRemark,
+		EventFace: d.eventFace, Remark: d.curRemark,
 	})
+}
+
+func clampUnit(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // Run is the daemon entrypoint. Returns nil immediately if another instance holds
