@@ -26,9 +26,13 @@ type Remark struct {
 
 // Now is Layer 1 — the only file the renderer reads. Overwritten ~1s by the daemon.
 type Now struct {
-	Mood     Mood    `json:"mood"`
-	Activity string  `json:"activity"` // thinking|tool_running|delegating|idle
-	Remark   *Remark `json:"remark"`
+	Mood        Mood    `json:"mood"`
+	Activity    string  `json:"activity"`      // thinking|tool_running|delegating|idle
+	Tone        string  `json:"tone"`          // transient color hint: error|warning|success|""
+	StateHeldMs int64   `json:"state_held_ms"` // how long Activity has been stable (habitat gating)
+	LastTool    string  `json:"last_tool"`     // last tool name (Edit/Read/Bash/Agent/...) for accessory
+	OpenToolMs  int64   `json:"open_tool_ms"`  // age of oldest open tool (warning escalation)
+	Remark      *Remark `json:"remark"`
 }
 
 // ReadNow loads now.json. Callers fall back to a neutral Now on error so the

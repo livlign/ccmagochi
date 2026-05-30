@@ -1,109 +1,260 @@
-// Package face maps mood + activity to a colored, animated kaomoji.
-// Two layers: Expression() is the stable base state (priority logic lives here);
-// frameGlyph() adds per-second ambient motion (blink, glance, spinner, talk).
-// Animation is 1 frame/second — that's the Claude Code status-line ceiling.
+// Package face composes the pet's appearance from layered, render-only signals
+// (mood + activity + tone, all already in now.json). Layers, in render order:
+// expression → eye-char → posture → color(hue+brightness) → micro-animation →
+// accessory. Animation is 1 frame/second (the Claude Code status-line ceiling).
+//
+// v1.3 scope: the layers that are derivable from current state. Features needing
+// signals now.json doesn't carry (edit/read/revert/test-pass accessories;
+// content/skeptical/satisfied faces; sustained-duration habitat; warning
+// escalation; color interpolation) are intentionally NOT here — see worklog.
 package face
 
 import "ccmagotchi/internal/state"
 
 const reset = "\x1b[0m"
 
-const (
-	grey      = "\x1b[90m"
-	dim       = "\x1b[2;37m"
-	brightCyn = "\x1b[96m"
-	cyan      = "\x1b[36m"
-	amber     = "\x1b[33m"
-	warm      = "\x1b[38;5;215m"
-)
-
-// Expression returns the stable base state key. Priority is deliberate:
-// genuine distress wins; then what you're DOING; sleepy only when actually idle
-// (fixes the bug where high tiredness pinned the face to [-_-] while working).
+// Expression: the base state key, from mood + activity + tone. Priority:
+// transient distress → what you're doing → mood regions → neutral.
 func Expression(n state.Now) string {
 	m := n.Mood
 	switch {
-	case m.Stress > 0.85:
-		return "overwhelmed"
+	case n.Tone == "error":
+		return "alarmed"
 	case n.Activity == "delegating":
 		return "delegating"
 	case n.Activity == "tool_running":
 		return "working"
 	case n.Activity == "thinking":
 		return "thinking"
+	case m.Stress > 0.85:
+		return "distressed"
+	case m.Tiredness > 0.9:
+		return "exhausted"
 	case n.Activity == "idle" && m.Tiredness > 0.7:
 		return "sleepy"
 	case m.Curiosity > 0.6 && m.Tiredness < 0.5:
-		return "curious"
+		return "curious" // engaged beats drained
+	case n.Activity == "idle" && m.Energy < 0.3:
+		return "bored"
 	default:
 		return "neutral"
 	}
 }
 
-func colorFor(n state.Now, expr string) string {
-	switch expr {
-	case "overwhelmed":
-		return amber
-	case "sleepy":
-		return dim
-	case "curious":
-		return brightCyn
+// hue maps state → color name (tone wins). Brightness comes from energy (sgr).
+func hue(n state.Now) string {
+	switch n.Tone {
+	case "error":
+		return "red"
+	case "warning":
+		return "yellow"
+	case "success":
+		return "blue"
+	}
+	switch Expression(n) {
 	case "delegating":
-		return cyan
-	}
-	// neutral/working/thinking: tint by mood so the same face reads differently
-	switch {
-	case n.Mood.Tiredness > 0.6:
-		return dim
-	case n.Mood.Stress > 0.5:
-		return warm
-	default:
-		return grey
-	}
-}
-
-// animation frame sets (cycled by wall-clock second)
-var (
-	spinner   = []string{"◐", "◓", "◑", "◒"}      // working
-	talkMouth = []string{"_", "o", "O", "o"}      // speaking
-	delegArr  = []string{"→", "➤", "→", "➤"}      // delegating
-	thinkDots = []string{"   ", ".  ", ".. ", "..."}
-	sleepZ    = []string{" ", "z", "zz", "z"}
-)
-
-func frameGlyph(expr string, frame int64, talking bool) string {
-	f := int(frame)
-	if talking { // the pet talks while it talks — mouth moves on any face
-		return "[◉" + talkMouth[f%len(talkMouth)] + "◉]"
-	}
-	switch expr {
-	case "overwhelmed":
-		return "[x_x]"
-	case "delegating":
-		return "[◉_◉]" + delegArr[f%len(delegArr)]
+		return "magenta"
 	case "working":
-		return "[◉_◉]" + spinner[f%len(spinner)]
+		return "green"
 	case "thinking":
-		return "[•_•]" + thinkDots[f%len(thinkDots)]
-	case "sleepy":
-		return "[-_-]" + sleepZ[f%len(sleepZ)]
+		return "teal"
 	case "curious":
-		return []string{"[O_O]", "[O_O]", "[o_o]", "[O_O]"}[f%4]
-	default: // neutral: mostly steady, an occasional glance and a 1-frame blink = ambient life
-		switch f % 10 {
-		case 3:
-			return "[◔_◔]" // glance aside
-		case 7:
-			return "[-_-]" // blink
-		default:
-			return "[◉_◉]"
-		}
+		return "cyan"
+	case "alarmed", "distressed":
+		return "red"
+	default: // sleepy/exhausted/bored/neutral
+		return "grey"
 	}
 }
 
-// Pick renders the animated, colored face for the current state at frame
+// sgr returns the ANSI color for a hue at a brightness derived from energy
+// (low → dim, mid → normal, high → bright). teal≈cyan in 16-color terminals.
+func sgr(h string, energy float64) string {
+	lvl := 1
+	if energy < 0.3 {
+		lvl = 0
+	} else if energy > 0.75 {
+		lvl = 2
+	}
+	table := map[string][3]string{
+		"grey":    {"\x1b[2;37m", "\x1b[90m", "\x1b[37m"},
+		"green":   {"\x1b[2;32m", "\x1b[32m", "\x1b[92m"},
+		"teal":    {"\x1b[2;36m", "\x1b[36m", "\x1b[96m"},
+		"red":     {"\x1b[2;31m", "\x1b[31m", "\x1b[91m"},
+		"yellow":  {"\x1b[2;33m", "\x1b[33m", "\x1b[93m"},
+		"blue":    {"\x1b[2;34m", "\x1b[34m", "\x1b[94m"},
+		"magenta": {"\x1b[2;35m", "\x1b[35m", "\x1b[95m"},
+		"cyan":    {"\x1b[2;36m", "\x1b[36m", "\x1b[96m"},
+	}
+	if v, ok := table[h]; ok {
+		return v[lvl]
+	}
+	return "\x1b[90m"
+}
+
+// eyeChar: engagement intensity from activity + energy.
+func eyeChar(n state.Now) string {
+	switch {
+	case n.Activity == "tool_running" || n.Activity == "thinking":
+		return "◉" // focused
+	case n.Mood.Energy < 0.25:
+		return "·" // drifting
+	case n.Mood.Energy > 0.8:
+		return "●" // locked in
+	default:
+		return "•" // normal
+	}
+}
+
+// posture: brackets carry disposition. Breathe pulse on calm states.
+func posture(n state.Now, tick int64) (string, string) {
+	if tick%13 == 0 && n.Tone == "" && n.Mood.Stress < 0.5 {
+		return "(", ")" // breathe
+	}
+	switch {
+	case n.Tone == "error":
+		return "/", "\\" // braced / defensive
+	case n.Tone == "success":
+		return "\\", "/" // arms up — celebrating
+	case n.Mood.Stress > 0.6:
+		return "{", "}" // tense
+	case n.Mood.Curiosity > 0.6 && n.Mood.Tiredness < 0.4:
+		return "<", ">" // leaning in
+	default:
+		return "[", "]"
+	}
+}
+
+// accessory: the single attention glyph. v1.4 distinguishes edit vs other tools
+// via LastTool.
+func accessory(n state.Now) string {
+	switch {
+	case n.Tone == "error":
+		return "☂"
+	case n.Activity == "delegating":
+		return "↯"
+	case n.Activity == "tool_running":
+		switch n.LastTool {
+		case "Edit", "Write", "MultiEdit", "NotebookEdit":
+			return "✎"
+		default:
+			return "⚙" // Read/Bash/Grep/etc. (read-eye glyph deferred — emoji width risk)
+		}
+	case n.Activity == "thinking":
+		return "…"
+	case n.Activity == "idle" && n.Mood.Tiredness > 0.7:
+		return "zZ"
+	default:
+		return ""
+	}
+}
+
+const longToolMs = 30000 // display threshold for warning escalation (≈ persona LongToolCallMs)
+
+// warnColor escalates yellow→orange→red by how long a tool has been running.
+func warnColor(openMs int64) string {
+	switch {
+	case openMs > 16*longToolMs:
+		return "\x1b[91m" // red — effective failure
+	case openMs > 8*longToolMs:
+		return "\x1b[38;5;208m" // orange
+	case openMs > 4*longToolMs:
+		return "\x1b[93m" // bright yellow
+	default:
+		return "\x1b[33m" // soft yellow
+	}
+}
+
+// habitat returns flanking decoration for sustained states (held >30s) or the
+// alarm event. Empty most of the time — decoration is the exception. Suppressed
+// during a remark (the text fills the line).
+func habitat(n state.Now, expr string) (left, right string) {
+	if n.Tone == "error" {
+		return "", " !!" // alarm (event-driven, no sustain needed)
+	}
+	if n.StateHeldMs < 30000 {
+		return "", "" // sustained-only
+	}
+	switch expr {
+	case "sleepy", "exhausted":
+		return "· ", " ·" // sleeping
+	case "working", "thinking", "delegating":
+		return "› ", " ‹" // intense focus
+	case "neutral", "bored":
+		if n.Mood.Stress < 0.4 {
+			return "~ ", " ~" // calm waters
+		}
+		return "· ", " ·" // quiet
+	case "curious":
+		return "· ", " ·"
+	}
+	return "", ""
+}
+
+var talkMouth = []string{"_", "o", "O", "o"}
+
+// facialFrame returns the eyes+mouth core, applying special faces, the talk
+// mouth, and micro-animation (yawn > look > blink) for open-eyed faces.
+func facialFrame(n state.Now, expr string, tick int64, talking bool) (l, mouth, r string) {
+	switch expr { // fixed special faces
+	case "alarmed":
+		return "O", "_", "O"
+	case "distressed":
+		return ">", "_", "<"
+	case "exhausted":
+		return "x", "_", "x"
+	case "sleepy":
+		if tick%90 < 2 { // occasional yawn
+			return "O", "_", "o"
+		}
+		return "-", "_", "-"
+	}
+	if talking { // the pet talks while it talks
+		return "◉", talkMouth[int(tick)%len(talkMouth)], "◉"
+	}
+	// distinctive base eyes + mouth per expression / tone
+	mouth = "_"
+	switch {
+	case n.Tone == "success":
+		l, r = "˘", "˘" // satisfied (closed-happy)
+	case expr == "bored":
+		l, r = "◔", "◔" // glazed
+	case expr == "curious":
+		l, r = "⊙", "⊙" // wide-eyed
+	case expr == "neutral" && n.Mood.Stress < 0.3 && n.Mood.Energy > 0.4:
+		e := eyeChar(n)
+		l, r, mouth = e, e, "‿" // content — subtle smile
+	default: // working / thinking / delegating / plain neutral
+		e := eyeChar(n)
+		l, r = e, e
+	}
+	switch { // micro-animation overlay (look > blink)
+	case tick%11 == 0 && expr != "bored":
+		l, r = "◔", "◔" // glance aside
+	case tick%6 == 0:
+		l, r = "-", "-" // blink
+	}
+	return l, mouth, r
+}
+
+// Pick composes the full animated, colored pet for the current state at tick
 // (wall-clock seconds). talking = a remark is currently shown.
-func Pick(n state.Now, frame int64, talking bool) string {
+func Pick(n state.Now, tick int64, talking bool) string {
 	expr := Expression(n)
-	return colorFor(n, expr) + frameGlyph(expr, frame, talking) + reset
+	lb, rb := posture(n, tick)
+	l, mouth, r := facialFrame(n, expr, tick, talking)
+	body := lb + l + mouth + r + rb
+	if acc := accessory(n); acc != "" {
+		body += " " + acc
+	}
+	// habitat decoration (suppressed during a remark)
+	if !talking {
+		hl, hr := habitat(n, expr)
+		body = hl + body + hr
+	}
+	col := sgr(hue(n), n.Mood.Energy)
+	if n.Tone == "warning" {
+		col = warnColor(n.OpenToolMs) // escalates with time
+	}
+	return col + body + reset
 }

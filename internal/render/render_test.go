@@ -20,7 +20,7 @@ func writeNow(t *testing.T, dir, json string) {
 // (Glyph is animated, so assert the expression class, not an exact frame.)
 func TestRun_ComposesBaseThenPet(t *testing.T) {
 	dir := t.TempDir()
-	writeNow(t, dir, `{"mood":{"curiosity":0.8,"tiredness":0.1},"activity":"idle"}`)
+	writeNow(t, dir, `{"mood":{"curiosity":0.8,"tiredness":0.1,"energy":0.6},"activity":"idle"}`)
 	cfg := config.Config{StateDir: dir, BaseStatusCommand: `echo "DASH | Ctx: 50%"`}
 
 	out := Run([]byte(`{"model":{"display_name":"x"}}`), cfg)
@@ -31,8 +31,8 @@ func TestRun_ComposesBaseThenPet(t *testing.T) {
 	if lines[0] != "DASH | Ctx: 50%" {
 		t.Errorf("base line wrong: %q", lines[0])
 	}
-	if !strings.Contains(strings.ToUpper(lines[1]), "O_O") { // curious expression (any frame)
-		t.Errorf("want curious face on line 2, got %q", lines[1])
+	if !strings.Contains(lines[1], "[36m") { // curious → cyan (stable; posture animates)
+		t.Errorf("want curious cyan on line 2, got %q", lines[1])
 	}
 }
 
@@ -55,25 +55,25 @@ func TestRun_NoBase_OnlyPet(t *testing.T) {
 	if strings.Contains(out, "\n") {
 		t.Errorf("want single line, got %q", out)
 	}
-	if !strings.Contains(out, "[") || !strings.Contains(out, "]") {
-		t.Errorf("want a bracketed face, got %q", out)
+	if !strings.Contains(out, "_") { // a face is present (mouth char)
+		t.Errorf("want a face, got %q", out)
 	}
 }
 
 // Daemon hasn't written now.json yet → never errors, still renders a face.
 func TestRun_MissingNow_NeverErrors(t *testing.T) {
 	out := Run(nil, config.Config{StateDir: t.TempDir()})
-	if !strings.Contains(out, "[") {
+	if !strings.Contains(out, "_") {
 		t.Errorf("want a fallback face, got %q", out)
 	}
 }
 
-// High stress renders the overwhelmed face (stable across frames).
-func TestRun_OverwhelmedFace(t *testing.T) {
+// High stress (idle) renders the distressed face.
+func TestRun_DistressedFace(t *testing.T) {
 	dir := t.TempDir()
-	writeNow(t, dir, `{"mood":{"stress":0.95},"activity":"tool_running"}`)
+	writeNow(t, dir, `{"mood":{"stress":0.95},"activity":"idle"}`)
 	out := Run(nil, config.Config{StateDir: dir})
-	if !strings.Contains(out, "[x_x]") {
-		t.Errorf("want overwhelmed face, got %q", out)
+	if !strings.Contains(out, ">_<") {
+		t.Errorf("want distressed face, got %q", out)
 	}
 }

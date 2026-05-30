@@ -34,8 +34,13 @@ type Daemon struct {
 	thinkMaxMs   int64
 	filesCount   int
 	lastEventTS  int64
-	curRemark    *state.Remark
-	lastTick     time.Time
+	curRemark     *state.Remark
+	flashTone     string // "error"|"success" transient color, with expiry
+	flashExpires  int64
+	lastTool      string // last tool name seen (for the edit/read accessory)
+	prevActivity  string
+	activitySince int64 // ms when the current activity began (for habitat gating)
+	lastTick      time.Time
 }
 
 func New(cfg config.Config) *Daemon {
@@ -66,7 +71,7 @@ func (d *Daemon) Tick() {
 		d.sessionStart = 0
 	}
 
-	justDelegated := false
+	justDelegated, errFlash, doneFlash := false, false, false
 	if d.tailer != nil {
 		for _, line := range d.tailer.ReadNew() {
 			for _, e := range d.cls.Classify(line) {
@@ -77,15 +82,24 @@ func (d *Daemon) Tick() {
 				}
 				mood.Apply(&d.m, e, d.p)
 				switch e.Type {
+				case "error":
+					errFlash = true
 				case "tool_done":
-					if v := events.Num(e.Data["duration_ms"]); v > d.toolMaxMs {
+					v := events.Num(e.Data["duration_ms"])
+					if v > d.toolMaxMs {
 						d.toolMaxMs = v
+					}
+					if v > d.p.LongToolCallMs {
+						doneFlash = true // a long-awaited task finished → success
 					}
 				case "thinking_turn":
 					if v := events.Num(e.Data["duration_ms"]); v > d.thinkMaxMs {
 						d.thinkMaxMs = v
 					}
 				case "tool_call":
+					if name, ok := e.Data["name"].(string); ok {
+						d.lastTool = name
+					}
 					if f, ok := e.Data["file"].(string); ok && f != "" {
 						d.fileRepeat[f]++
 						if !d.seenFiles[f] {
@@ -95,6 +109,7 @@ func (d *Daemon) Tick() {
 						}
 					}
 				case "subagent_spawn":
+					d.lastTool = "Agent"
 					justDelegated = true
 				}
 			}
@@ -142,7 +157,41 @@ func (d *Daemon) Tick() {
 		}
 	}
 
-	state.WriteNow(d.cfg.NowPath(), state.Now{Mood: d.m, Activity: act, Remark: d.curRemark})
+	// transient color tone: error flash > success flash > live "warning" (too long)
+	if d.flashTone != "" && nowMs > d.flashExpires {
+		d.flashTone = ""
+	}
+	if errFlash {
+		d.flashTone, d.flashExpires = "error", nowMs+5000
+	} else if doneFlash && d.flashTone != "error" {
+		d.flashTone, d.flashExpires = "success", nowMs+3000
+	}
+	tone := d.flashTone
+	if tone == "" {
+		if oldest := d.cls.OldestOpenToolStart(); oldest > 0 && nowMs-oldest > d.p.LongToolCallMs {
+			tone = "warning"
+		}
+	}
+
+	// how long we've held this activity (for sustained-state habitat gating)
+	if act != d.prevActivity {
+		d.prevActivity = act
+		d.activitySince = nowMs
+	}
+	stateHeld := int64(0)
+	if d.activitySince > 0 {
+		stateHeld = nowMs - d.activitySince
+	}
+	openToolMs := int64(0)
+	if om := d.cls.OldestOpenToolStart(); om > 0 {
+		openToolMs = nowMs - om
+	}
+
+	state.WriteNow(d.cfg.NowPath(), state.Now{
+		Mood: d.m, Activity: act, Tone: tone,
+		StateHeldMs: stateHeld, LastTool: d.lastTool, OpenToolMs: openToolMs,
+		Remark: d.curRemark,
+	})
 }
 
 // Run is the daemon entrypoint. Returns nil immediately if another instance holds

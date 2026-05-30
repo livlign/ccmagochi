@@ -151,6 +151,18 @@ func (c *Classifier) OpenAgents() int {
 }
 func (c *Classifier) OpenTools() int { return len(c.openTools) }
 
+// OldestOpenToolStart returns the spawn ts of the longest-running open tool
+// (0 if none) — drives the "warning: taking too long" tone.
+func (c *Classifier) OldestOpenToolStart() int64 {
+	var oldest int64
+	for _, t := range c.openTools {
+		if oldest == 0 || t.ts < oldest {
+			oldest = t.ts
+		}
+	}
+	return oldest
+}
+
 // --- Tailer: read only complete new lines, tracking byte offset ---
 
 type Tailer struct {

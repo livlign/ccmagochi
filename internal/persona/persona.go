@@ -26,7 +26,9 @@ func Default() Persona {
 		LongThinkingMs: 20000,
 		ManyFiles:      8,
 		SameFileRepeat: 5,
-		IdleSeconds:    90,
+		IdleSeconds:    600, // a long thinking turn writes nothing to the transcript;
+		// don't call silence "idle" until ~10min (else the pet sleeps mid-turn).
+		// Precise active/idle needs the hook heartbeat — see worklog v1.4 note.
 		RemarkCap:      5,
 		CooldownTurns:  8,
 		RecencyWindow:  20,
