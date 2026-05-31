@@ -7,218 +7,323 @@ import (
 	"ccmagotchi/internal/state"
 )
 
-func TestExpression_Priority(t *testing.T) {
+// The signature: the snout ᴥ and round parens ( ) are present in EVERY state,
+// and square brackets / the kaomoji "_" mouth never appear.
+func TestPick_SignatureAlwaysDog(t *testing.T) {
+	states := []state.Now{
+		{Activity: "idle", Mood: state.Mood{Energy: 0.6}},
+		{Activity: "tool_running"},
+		{Activity: "thinking"},
+		{Tone: "error"},
+		{Tone: "success", Mood: state.Mood{Energy: 0.9}},
+		{Mood: state.Mood{Stress: 0.95}, Activity: "idle"},
+		{Mood: state.Mood{Tiredness: 0.95}, Activity: "idle"},
+		{EventFace: "skeptical"},
+		{EventFace: "cheeky"},
+	}
+	for _, n := range states {
+		for tk := int64(0); tk < 6; tk++ { // cover idle-overlay frames too
+			out := Pick(n, tk, "")
+			if !strings.Contains(out, snout) {
+				t.Errorf("snout missing for %+v: %q", n, out)
+			}
+			if !strings.Contains(out, "(") || !strings.Contains(out, ")") {
+				t.Errorf("parens missing for %+v: %q", n, out)
+			}
+			// NB: ANSI color codes contain '[', so we check ']' and '_', which
+			// the old kaomoji used but neither the dog nor ANSI escapes do.
+			if strings.Contains(out, "]") || strings.Contains(out, "_") {
+				t.Errorf("dog must not use square brackets/underscore: %q", out)
+			}
+		}
+	}
+}
+
+func TestDogMood_Priority(t *testing.T) {
 	cases := []struct {
 		name string
 		n    state.Now
 		want string
 	}{
-		{"error tone → alarmed", state.Now{Tone: "error", Activity: "tool_running"}, "alarmed"},
-		{"delegating", state.Now{Activity: "delegating"}, "delegating"},
-		{"working", state.Now{Activity: "tool_running"}, "working"},
+		{"error → alarmed", state.Now{Tone: "error", Activity: "tool_running"}, "alarmed"},
+		{"working → focused", state.Now{Activity: "tool_running"}, "focused"},
+		{"long working → determined", state.Now{Activity: "tool_running", StateHeldMs: 150000}, "determined"},
+		{"very long → fixation", state.Now{Activity: "tool_running", StateHeldMs: 400000}, "fixation"},
 		{"thinking", state.Now{Activity: "thinking"}, "thinking"},
-		{"BUG FIX: thinking while very tired is NOT sleepy/exhausted", state.Now{Activity: "thinking", Mood: state.Mood{Tiredness: 0.95}}, "thinking"},
-		{"distressed (high stress)", state.Now{Activity: "idle", Mood: state.Mood{Stress: 0.9}}, "distressed"},
-		{"exhausted (very tired, idle)", state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.95}}, "exhausted"},
-		{"sleepy (idle + tired)", state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.75}}, "sleepy"},
-		{"bored (idle + drained)", state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.1}}, "bored"},
+		{"distressed", state.Now{Activity: "idle", Mood: state.Mood{Stress: 0.9}}, "distressed"},
+		{"exhausted", state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.95}}, "exhausted"},
+		{"sleepy", state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.75}}, "sleepy"},
+		{"deep idle → dreaming", state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.75}, StateHeldMs: 130000}, "dreaming"},
 		{"curious", state.Now{Activity: "idle", Mood: state.Mood{Curiosity: 0.8, Tiredness: 0.1, Energy: 0.6}}, "curious"},
-		{"neutral", state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, "neutral"},
+		{"neutral", state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6, Stress: 0.5}}, "neutral"},
 	}
 	for _, c := range cases {
-		if g := Expression(c.n); g != c.want {
+		if g := dogMood(c.n); g != c.want {
 			t.Errorf("%s: want %q got %q", c.name, c.want, g)
 		}
 	}
 }
 
-func TestHue_ToneWinsThenActivity(t *testing.T) {
-	checks := map[string]state.Now{
-		"red":     {Tone: "error"},
-		"yellow":  {Tone: "warning"},
-		"blue":    {Tone: "success"},
-		"green":   {Activity: "tool_running"},
-		"teal":    {Activity: "thinking"},
-		"magenta": {Activity: "delegating"},
-		"grey":    {Activity: "idle", Mood: state.Mood{Energy: 0.6}},
+func TestEyes_MoodMapping(t *testing.T) {
+	want := map[string][2]string{
+		"neutral":    {"•", "•"},
+		"alarmed":    {"O", "O"},
+		"focused":    {"◉", "◉"},
+		"distressed": {">", "<"}, // asymmetric distress gesture
+		"determined": {"ò", "ó"}, // asymmetric determination
+		"satisfied":  {"˘", "˘"},
+		"skeptical":  {"¬", "¬"},
+		"exhausted":  {"×", "×"},
+		"cheeky":     {"◐", "•"}, // wink
 	}
-	for want, n := range checks {
-		if g := hue(n); g != want {
-			t.Errorf("hue(%+v): want %q got %q", n, want, g)
+	for mood, w := range want {
+		l, r := eyes(mood)
+		if l != w[0] || r != w[1] {
+			t.Errorf("%s eyes: want %s%s got %s%s", mood, w[0], w[1], l, r)
 		}
 	}
 }
 
-func TestSgr_BrightnessFromEnergy(t *testing.T) {
-	if sgr("green", 0.1) != "\x1b[2;32m" {
-		t.Error("low energy should be dim green")
+// Ears are BARE by default and appear only as gestures (pet-01-dog §4).
+func TestEars_States(t *testing.T) {
+	if l, r := ears(state.Now{}, "distressed"); l != "v" || r != "v" {
+		t.Errorf("distress → flat vv, got %s%s", l, r)
 	}
-	if sgr("green", 0.9) != "\x1b[92m" {
-		t.Error("high energy should be bright green")
+	if l, r := ears(state.Now{}, "skeptical"); l != "︶" || r != "︶" {
+		t.Errorf("skeptical → drooped, got %s%s", l, r)
 	}
-	if sgr("green", 0.5) != "\x1b[32m" {
-		t.Error("mid energy should be normal green")
+	if l, r := ears(state.Now{}, "dreaming"); l != "⌒" || r != "⌒" {
+		t.Errorf("dreaming → ⌒⌒, got %s%s", l, r)
 	}
-}
-
-func TestEyeChar(t *testing.T) {
-	if eyeChar(state.Now{Activity: "tool_running"}) != "◉" {
-		t.Error("active → focused eye ◉")
+	if l, r := ears(state.Now{Mood: state.Mood{Energy: 0.5}}, "neutral"); l != "" || r != "" {
+		t.Errorf("relaxed neutral → BARE (no ears), got %q%q", l, r)
 	}
-	if eyeChar(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.1}}) != "·" {
-		t.Error("drained → faint ·")
+	if l, _ := ears(state.Now{Tone: "error"}, "alarmed"); l != "^" {
+		t.Error("alarmed → perked ^^")
 	}
-	if eyeChar(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.9}}) != "●" {
-		t.Error("high energy → ●")
-	}
-}
-
-func TestPosture(t *testing.T) {
-	if l, _ := posture(state.Now{Mood: state.Mood{Stress: 0.7}}, 1); l != "{" {
-		t.Error("stress → tense {}")
-	}
-	if l, _ := posture(state.Now{Mood: state.Mood{Curiosity: 0.7, Tiredness: 0.1}}, 1); l != "<" {
-		t.Error("curious → leaning <>")
-	}
-	if l, _ := posture(state.Now{Tone: "error"}, 1); l != "/" {
-		t.Error("error → braced /\\")
-	}
-	if l, _ := posture(state.Now{Mood: state.Mood{Energy: 0.5}}, 1); l != "[" {
-		t.Error("default → []")
+	// a fresh event transiently perks an otherwise-bare face
+	if l, _ := ears(state.Now{Activity: "tool_running", StateHeldMs: 1000}, "focused"); l != "^" {
+		t.Error("a just-started tool perks the ears")
 	}
 }
 
-func TestAccessory(t *testing.T) {
-	want := map[string]state.Now{
-		"☂":  {Tone: "error"},
-		"⚙":  {Activity: "tool_running"},
-		"…":  {Activity: "thinking"},
-		"↯":  {Activity: "delegating"},
-		"zZ": {Activity: "idle", Mood: state.Mood{Tiredness: 0.8}},
-		"":   {Activity: "idle", Mood: state.Mood{Energy: 0.6}},
+// The tail rests (~) in calm/working states, wags in positive ones, and tucks
+// (hidden) only when tense or in deep sleep.
+func TestTail_VisibilityAndWag(t *testing.T) {
+	if tail(state.Now{}, "focused", 0) != "~" {
+		t.Error("focused dog rests its tail ~ (only tense states tuck)")
 	}
-	for w, n := range want {
-		if g := accessory(n); g != w {
-			t.Errorf("accessory(%+v): want %q got %q", n, w, g)
+	if tail(state.Now{}, "neutral", 0) != "~" {
+		t.Error("neutral dog shows a resting tail ~")
+	}
+	if tail(state.Now{}, "distressed", 0) != "" {
+		t.Error("distressed dog tucks its tail (hidden)")
+	}
+	if tail(state.Now{}, "alarmed", 0) != "" {
+		t.Error("alarmed dog tucks its tail")
+	}
+	if tail(state.Now{}, "sleepy", 0) != "~" {
+		t.Error("sleepy → tail at rest ~")
+	}
+	a := tail(state.Now{}, "joyful", 0)
+	b := tail(state.Now{}, "joyful", 1)
+	if a == b || (a != "~" && a != "-") {
+		t.Errorf("joyful tail should wag (animate ~/-), got %q then %q", a, b)
+	}
+	if tail(state.Now{Tone: "success"}, "satisfied", 0) != "↗" {
+		t.Error("a fresh success raises the tail ↗")
+	}
+}
+
+// Walking turns the dog to a side profile (head leads travel, tail trails);
+// standing still restores the front signature face (pet-01-dog §11).
+func TestPick_WalkingSprite(t *testing.T) {
+	base := state.Mood{Energy: 0.6, Stress: 0.5}
+	if r := Pick(state.Now{Activity: "idle", Heading: "right", Mood: base}, 2, ""); !strings.Contains(r, spriteRight) {
+		t.Errorf("walking right → right-facing sprite, got %q", r)
+	}
+	if l := Pick(state.Now{Activity: "idle", Heading: "left", Mood: base}, 2, ""); !strings.Contains(l, spriteLeft) {
+		t.Errorf("walking left → left-facing sprite, got %q", l)
+	}
+	s := Pick(state.Now{Activity: "idle", Heading: "still", Mood: base}, 2, "")
+	if !strings.Contains(s, snout) || strings.Contains(s, spriteLeft) {
+		t.Errorf("standing still → front face with the snout, got %q", s)
+	}
+}
+
+// The paw greeting suppresses the tail and faces the user.
+func TestPick_GreetingPaw(t *testing.T) {
+	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}, Greeting: true}, 1, "")
+	if !strings.Contains(out, "/") {
+		t.Errorf("greeting should show the paw /, got %q", out)
+	}
+}
+
+// A bark renders beside the dog when set (and not while speaking a sentence).
+func TestPick_Bark(t *testing.T) {
+	out := Pick(state.Now{Tone: "error", Bark: "bork!"}, 1, "")
+	if !strings.Contains(out, "bork!") {
+		t.Errorf("bark should render beside the dog, got %q", out)
+	}
+	talk := Pick(state.Now{Tone: "error", Bark: "bork!"}, 1, "something")
+	if strings.Contains(talk, "bork!") {
+		t.Errorf("a spoken sentence suppresses the bark, got %q", talk)
+	}
+}
+
+func TestPick_SpeaksBeside(t *testing.T) {
+	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, "hello there")
+	if !strings.HasSuffix(out, "hello there"+reset) {
+		t.Errorf("sentence should sit inside the color span, got %q", out)
+	}
+}
+
+// The dog's anatomy is painted as the fixed white-bg / dark-fg signature badge
+// (decorations §2), never a state-varying color.
+func TestPick_SignatureBadge(t *testing.T) {
+	for _, n := range []state.Now{
+		{Activity: "idle", Mood: state.Mood{Energy: 0.6}},
+		{Tone: "error"},
+		{Activity: "tool_running"},
+	} {
+		out := Pick(n, 1, "")
+		if !strings.Contains(out, badgeOpen) {
+			t.Errorf("anatomy should be wrapped in the white-bg badge, got %q", out)
+		}
+		// the old state-color codes (cyan/green/red/gold/…) must be gone
+		for _, c := range []string{"[36m", "[32m", "[2;31m", "[48;5;", "[38;5;"} {
+			if strings.Contains(out, c) {
+				t.Errorf("state color %q should be gone (badge only), got %q", c, out)
+			}
 		}
 	}
 }
 
-func TestFacialFrame_SpecialAndAnimated(t *testing.T) {
-	l, _, r := facialFrame(state.Now{Tone: "error"}, "alarmed", 1, false)
-	if l != "O" || r != "O" {
-		t.Errorf("alarmed should be O_O, got %s_%s", l, r)
-	}
-	// open face animates across a 12s window (blink/glance differ from steady)
-	steady, _, _ := facialFrame(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, "neutral", 1, false)
-	moved := false
-	for tk := int64(0); tk < 12; tk++ {
-		if l, _, _ := facialFrame(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, "neutral", tk, false); l != steady {
-			moved = true
+// Baseline life: a calm idle dog blinks periodically (closed-eye frames appear),
+// so it never reads as a frozen glyph between behaviors.
+func TestPick_Blinks(t *testing.T) {
+	n := state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6, Stress: 0.5}} // neutral
+	open, closed := 0, 0
+	for tk := int64(0); tk < 14; tk++ {
+		if strings.Contains(Pick(n, tk, ""), "(-ᴥ-)") {
+			closed++
+		} else {
+			open++
 		}
 	}
-	if !moved {
-		t.Error("neutral face should show ambient motion across a cycle")
+	if closed == 0 {
+		t.Error("the dog should blink (a closed-eye frame) within a 14s span")
 	}
-	// talking animates the mouth
-	if _, m0, _ := facialFrame(state.Now{}, "neutral", 0, true); m0 == "" {
-		t.Error("talking should produce a mouth char")
-	}
-}
-
-func TestHabitat_SustainedAndAlarm(t *testing.T) {
-	if _, r := habitat(state.Now{Tone: "error"}, "alarmed"); r != " !!" {
-		t.Errorf("alarm habitat should be ' !!', got %q", r)
-	}
-	if l, r := habitat(state.Now{StateHeldMs: 1000}, "neutral"); l != "" || r != "" {
-		t.Errorf("under 30s should have no habitat, got %q/%q", l, r)
-	}
-	if l, _ := habitat(state.Now{StateHeldMs: 40000}, "sleepy"); l != "· " {
-		t.Errorf("sustained sleepy → '· ', got %q", l)
-	}
-	if l, _ := habitat(state.Now{StateHeldMs: 40000, Mood: state.Mood{Stress: 0.1}}, "neutral"); l != "~ " {
-		t.Errorf("sustained calm → calm waters '~ ', got %q", l)
-	}
-	if l, _ := habitat(state.Now{StateHeldMs: 40000}, "working"); l != "› " {
-		t.Errorf("sustained working → focus '› ', got %q", l)
+	if open == 0 {
+		t.Error("the dog should be open-eyed most of the time")
 	}
 }
 
-func TestAccessory_EditVsTool(t *testing.T) {
-	if accessory(state.Now{Activity: "tool_running", LastTool: "Edit"}) != "✎" {
-		t.Error("edit tool → ✎")
+func TestAmazed_Starry(t *testing.T) {
+	if dogMood(state.Now{EventFace: "amazed"}) != "amazed" {
+		t.Error("amazed eventFace → amazed mood")
 	}
-	if accessory(state.Now{Activity: "tool_running", LastTool: "Bash"}) != "⚙" {
-		t.Error("non-edit tool → ⚙")
-	}
-}
-
-func TestWarnColor_Escalates(t *testing.T) {
-	soft := warnColor(longToolMs * 3)
-	bright := warnColor(longToolMs * 5)
-	orange := warnColor(longToolMs * 9)
-	red := warnColor(longToolMs * 20)
-	if soft == bright || bright == orange || orange == red {
-		t.Error("warning color should escalate distinctly with time")
-	}
-	if red != "\x1b[91m" {
-		t.Errorf("16× threshold → red, got %q", red)
+	if l, r := eyes("amazed"); l != "★" || r != "★" {
+		t.Errorf("amazed → starry eyes, got %s%s", l, r)
 	}
 }
 
-func TestFacialFrame_DistinctiveEyes(t *testing.T) {
-	// tick=1 avoids the blink (%6) and glance (%11) overlay frames
-	if l, _, _ := facialFrame(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.1}}, "bored", 1, false); l != "◔" {
-		t.Errorf("bored → glazed ◔, got %q", l)
+// Idle overlay fires a sparse micro-behavior (a glance) in calm idle.
+func TestIdleOverlay_Fires(t *testing.T) {
+	o := idleOverlay(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6, Stress: 0.5}}, "neutral", 0)
+	if !o.ok {
+		t.Fatal("idle neutral should fire a behavior at the start of a window")
 	}
-	if l, _, _ := facialFrame(state.Now{Activity: "idle", Mood: state.Mood{Curiosity: 0.8, Energy: 0.6}}, "curious", 1, false); l != "⊙" {
-		t.Errorf("curious → wide-eyed ⊙, got %q", l)
+	// focused work is never interrupted
+	if idleOverlay(state.Now{Activity: "tool_running"}, "focused", 0).ok && idleOverlay(state.Now{Activity: "tool_running"}, "focused", 60).ok {
+		// long-running has its OWN sparse window — fine if it occasionally fires,
+		// but it must be silent most ticks
 	}
-	if l, _, _ := facialFrame(state.Now{Tone: "success"}, "neutral", 1, false); l != "˘" {
-		t.Errorf("success → satisfied ˘, got %q", l)
+	busy := 0
+	for tk := int64(0); tk < 53; tk++ { // one long-running window
+		if idleOverlay(state.Now{Activity: "tool_running"}, "focused", tk).ok {
+			busy++
+		}
 	}
-	if _, m, _ := facialFrame(state.Now{Activity: "idle", Mood: state.Mood{Stress: 0.1, Energy: 0.6}}, "neutral", 1, false); m != "‿" {
-		t.Errorf("calm neutral → content smile ‿, got %q", m)
-	}
-}
-
-func TestEventFace_DevReactions(t *testing.T) {
-	// EventFace overrides activity/mood (a salient dev reaction)
-	if Expression(state.Now{EventFace: "skeptical", Activity: "tool_running"}) != "skeptical" {
-		t.Error("EventFace should win over activity")
-	}
-	if l, _, _ := facialFrame(state.Now{}, "skeptical", 1, false); l != "¬" {
-		t.Error("skeptical → ¬_¬")
-	}
-	if l, _, _ := facialFrame(state.Now{}, "disapproving", 1, false); l != "ಠ" {
-		t.Error("disapproving → ಠ_ಠ")
-	}
-	if l, _, _ := facialFrame(state.Now{}, "satisfied", 1, false); l != "˘" {
-		t.Error("satisfied → ˘_˘")
-	}
-	if l, _, r := facialFrame(state.Now{}, "cheeky", 1, false); l != "ᗒ" || r != "ᗕ" {
-		t.Error("cheeky → ᗒ_ᗕ")
-	}
-	// satisfied gets the milestone habitat
-	if _, r := habitat(state.Now{EventFace: "satisfied"}, "satisfied"); r != " ✦" {
-		t.Errorf("satisfied → milestone ✦, got %q", r)
+	if busy > 3 {
+		t.Errorf("long-running micro-behaviors must stay sparse, fired %d in a 53-tick window", busy)
 	}
 }
 
-func TestPosture_Celebrating(t *testing.T) {
-	if l, r := posture(state.Now{Tone: "success"}, 1); l != "\\" || r != "/" {
-		t.Errorf("success → celebrating \\ /, got %q %q", l, r)
+// A mood symbol renders beside the dog; a bark suppresses it.
+func TestPick_DecorAndBark(t *testing.T) {
+	idle := state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}
+	idle.Decor = "zZ"
+	if !strings.Contains(Pick(idle, 1, ""), "zZ") {
+		t.Error("a set mood symbol should render")
+	}
+	barked := idle
+	barked.Bark = "woof!"
+	out := Pick(barked, 1, "")
+	if !strings.Contains(out, "woof!") || strings.Contains(out, "zZ") {
+		t.Errorf("bark should win over the mood symbol, got %q", out)
 	}
 }
 
-func TestPick_WrapsColorReset(t *testing.T) {
-	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, "")
-	if !strings.HasSuffix(out, reset) || !strings.Contains(out, "•") {
-		t.Errorf("expected colored face ending in reset, got %q", out)
+// The 14-char cap drops the sound emission before the symbol.
+func TestPick_WidthCapDropsSound(t *testing.T) {
+	n := state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.8}} // sleepy → tail ~
+	n.Decor = "zZ"
+	n.Sound = "*snore*"
+	out := Pick(n, 1, "")
+	if !strings.Contains(out, "zZ") {
+		t.Error("symbol should survive the cap")
 	}
-	// a remark is rendered INSIDE the color span (before reset) → same color
-	withR := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}}, 1, "hello there")
-	if !strings.HasSuffix(withR, "hello there"+reset) {
-		t.Errorf("remark should sit inside the color span, got %q", withR)
+	if strings.Contains(out, "*snore*") {
+		t.Error("sound should be dropped first when over the width cap")
+	}
+}
+
+// A sentence-remark suppresses bark/symbol/sound (the sentence is the focus).
+func TestPick_RemarkSuppressesDecor(t *testing.T) {
+	n := state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}, Decor: "zZ", Bark: "woof!"}
+	out := Pick(n, 1, "hello")
+	if strings.Contains(out, "zZ") || strings.Contains(out, "woof!") {
+		t.Errorf("a spoken sentence suppresses decorations, got %q", out)
+	}
+}
+
+// A mood (eye) change is masked by one blink frame, then lands on the target
+// (pet-01-dog §14). Error/alarm/greeting snap instead.
+func TestPickFrame_BlinkOnMoodChange(t *testing.T) {
+	prev := Frame{Mood: "neutral", Heading: "still"}
+	n := state.Now{Activity: "thinking"} // → mood "thinking" (eyes ◔), a smoothable swap
+	frame1, sig1 := PickFrame(n, 4, "", prev)
+	if !strings.Contains(frame1, "(-ᴥ-)") {
+		t.Errorf("a mood change should blink first, got %q", frame1)
+	}
+	if !sig1.Pending {
+		t.Error("the blink frame should mark Pending so the next render lands on target")
+	}
+	frame2, sig2 := PickFrame(n, 4, "", sig1) // even tick → looking-up frame of the dart
+	if !strings.Contains(frame2, "(◔ᴥ◔)") {
+		t.Errorf("the tick after the blink should show the target (thinking) mood, got %q", frame2)
+	}
+	if sig2.Pending || sig2.Mood != "thinking" {
+		t.Errorf("after landing, frame should be the settled target, got %+v", sig2)
+	}
+	// an error snaps — no blink intermediate
+	snapFrame, _ := PickFrame(state.Now{Tone: "error"}, 3, "", Frame{Mood: "neutral", Heading: "still"})
+	if !strings.Contains(snapFrame, "(OᴥO)") {
+		t.Errorf("an error should snap straight to alarmed, got %q", snapFrame)
+	}
+}
+
+// ASCII fallback swaps the less-common ear glyphs (e.g. drooped ︶ → ,) but
+// never the snout.
+func TestAsciiFallback(t *testing.T) {
+	Ascii = true
+	defer func() { Ascii = false }()
+	out := Pick(state.Now{EventFace: "skeptical"}, 3, "") // drooped ︶ ears
+	if strings.Contains(out, "︶") {
+		t.Errorf("ascii mode should drop the ︶ ear glyph, got %q", out)
+	}
+	if !strings.Contains(out, snout) {
+		t.Errorf("the snout is never substituted, got %q", out)
 	}
 }

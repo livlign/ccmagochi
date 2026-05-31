@@ -22,6 +22,9 @@ type rawEntry struct {
 	Message   struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
+		Usage   struct {
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 }
 
@@ -107,6 +110,9 @@ func (c *Classifier) Classify(line []byte) []events.Event {
 
 	switch e.Type {
 	case "assistant":
+		if e.Message.Usage.OutputTokens > 0 { // token burn (idea.md Layer 1)
+			emit("usage", map[string]any{"output_tokens": e.Message.Usage.OutputTokens})
+		}
 		for _, b := range blocks {
 			switch b.Type {
 			case "thinking":
@@ -166,7 +172,16 @@ func (c *Classifier) Classify(line []byte) []events.Event {
 			}
 		}
 		if !sawToolResult {
-			emit("prompt_submit", nil) // a genuine user turn (content was text)
+			// a genuine user turn (content was text). Carry the text so the daemon
+			// can harvest vocabulary/tone from it; the daemon strips it before
+			// appending to events.log (raw prompt text is never persisted).
+			var txt string
+			_ = json.Unmarshal(e.Message.Content, &txt)
+			d := map[string]any(nil)
+			if txt != "" {
+				d = map[string]any{"text": txt}
+			}
+			emit("prompt_submit", d)
 		}
 	}
 
@@ -187,6 +202,18 @@ func (c *Classifier) OpenAgents() int {
 	return n
 }
 func (c *Classifier) OpenTools() int { return len(c.openTools) }
+
+// OpenAgentIDs returns the tool_use ids of currently-running subagents (open
+// Agent calls) — drives the world's robot companions.
+func (c *Classifier) OpenAgentIDs() []string {
+	var ids []string
+	for id, t := range c.openTools {
+		if t.name == "Agent" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
 
 // OldestOpenToolStart returns the spawn ts of the longest-running open tool
 // (0 if none) — drives the "warning: taking too long" tone.

@@ -12,6 +12,7 @@ import (
 	"ccmagotchi/internal/daemon"
 	"ccmagotchi/internal/render"
 	"ccmagotchi/internal/state"
+	"ccmagotchi/internal/world"
 )
 
 func main() {
@@ -65,10 +66,22 @@ func prepare(stdin []byte, cfg config.Config) {
 	var in struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
+		Cwd            string `json:"cwd"`
+		Workspace      struct {
+			CurrentDir string `json:"current_dir"`
+		} `json:"workspace"`
 	}
 	_ = json.Unmarshal(stdin, &in)
+	cwd := in.Cwd
+	if cwd == "" {
+		cwd = in.Workspace.CurrentDir // CC variants expose one or the other
+	}
 	if in.TranscriptPath != "" {
-		_ = state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: in.TranscriptPath, SessionID: in.SessionID})
+		// COLUMNS is a renderer-only env var; pass it to the daemon (which has no
+		// terminal) so it can bound the dog's movement + scenery to the world width.
+		_ = state.WriteSession(cfg.SessionPath(), state.Session{
+			TranscriptPath: in.TranscriptPath, SessionID: in.SessionID, Cwd: cwd, Cols: world.Cols(),
+		})
 	}
 	daemon.EnsureRunning(cfg)
 }

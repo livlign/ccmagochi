@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+
+	"ccmagotchi/internal/world"
 )
 
 // Mood is the fixed 5-variable model (continuous 0..1). The renderer maps it to
@@ -33,7 +35,19 @@ type Now struct {
 	LastTool    string  `json:"last_tool"`     // last tool name (Edit/Read/Bash/Agent/...) for accessory
 	OpenToolMs  int64   `json:"open_tool_ms"`  // age of oldest open tool (warning escalation)
 	EventFace   string  `json:"event_face"`    // transient dev-event reaction: skeptical|disapproving|satisfied|""
-	Remark      *Remark `json:"remark"`
+	TokenBurn   float64 `json:"token_burn"`    // output tokens/min over a recent window (Layer 1)
+	Favored     bool    `json:"favored"`       // current hour ≈ the pet's seeded preferred hour
+	Greeting    bool    `json:"greeting"`      // paw-up greeting (after a prompt / session start)
+	Bark        string  `json:"bark"`          // transient bark text beside the dog ("" = silent)
+	Decor       string  `json:"decor"`         // the single active mood symbol (zZ/…/♥/✦/;/'…) ("" = none)
+	Sound       string  `json:"sound"`         // italic sound emission (*huff* etc.) ("" = none)
+	Tint        string  `json:"tint"`          // rare background tint name (gold/pink) ("" = none)
+	// Layer 3 — world (pet-world.md): the dog's column + anchored scenery/ambient
+	Pos     int             `json:"pos"`     // dog's column within usable width
+	Heading string          `json:"heading"` // right|left|still (derived from target)
+	Scenery []world.Scenery `json:"scenery"` // anchored world objects
+	Ambient string          `json:"ambient"` // right-edge ambient caption ("" = none)
+	Remark  *Remark         `json:"remark"`
 }
 
 // ReadNow loads now.json. Callers fall back to a neutral Now on error so the
@@ -66,6 +80,35 @@ func WriteNow(path string, n Now) error {
 type Session struct {
 	TranscriptPath string `json:"transcript_path"`
 	SessionID      string `json:"session_id"`
+	Cwd            string `json:"cwd"`  // workspace dir (→ repo affinity, Layer 3)
+	Cols           int    `json:"cols"` // terminal COLUMNS (renderer-only env → daemon needs it for the world)
+}
+
+// Subagent is one robot companion in the world (pet-world §6), written to
+// subagents.json by the daemon.
+type Subagent struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"` // running | done
+	Pos     int    `json:"pos"`
+	Variant int    `json:"variant"` // eye-variant index (stable per id)
+	SinceMs int64  `json:"since_ms"`
+}
+
+func WriteSubagents(path string, subs []Subagent) error {
+	b, _ := json.Marshal(subs)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func ReadSubagents(path string) []Subagent {
+	var subs []Subagent
+	if b, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(b, &subs)
+	}
+	return subs
 }
 
 func WriteSession(path string, s Session) error {

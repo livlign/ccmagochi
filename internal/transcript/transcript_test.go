@@ -3,6 +3,8 @@ package transcript
 import (
 	"strings"
 	"testing"
+
+	"ccmagotchi/internal/events"
 )
 
 // Lines crafted to match the Phase-0 probe-confirmed schema.
@@ -25,6 +27,21 @@ func TestClassify_FullFlow(t *testing.T) {
 	want := "prompt_submit,thinking_turn,tool_call,subagent_spawn,tool_done,subagent_done"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("got %q\nwant %q", strings.Join(got, ","), want)
+	}
+}
+
+// An assistant message's usage.output_tokens becomes a `usage` event (token burn).
+func TestClassify_UsageEvent(t *testing.T) {
+	c := NewClassifier()
+	line := `{"type":"assistant","timestamp":"2026-05-30T00:00:30.000Z","message":{"role":"assistant","content":[{"type":"text"}],"usage":{"output_tokens":1234}}}`
+	var tok int64
+	for _, e := range c.Classify([]byte(line)) {
+		if e.Type == "usage" {
+			tok = events.Num(e.Data["output_tokens"])
+		}
+	}
+	if tok != 1234 {
+		t.Fatalf("want usage event with 1234 output tokens, got %d", tok)
 	}
 }
 

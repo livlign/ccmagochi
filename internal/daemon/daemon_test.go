@@ -8,6 +8,7 @@ import (
 
 	"ccmagotchi/internal/config"
 	"ccmagotchi/internal/state"
+	"ccmagotchi/internal/world"
 )
 
 func TestIsActiveEvent(t *testing.T) {
@@ -151,6 +152,212 @@ func TestTick_FavoriteFileCheeky(t *testing.T) {
 	n, _ := state.ReadNow(cfg.NowPath())
 	if n.EventFace != "cheeky" {
 		t.Errorf("new .go file (the favorite) → cheeky, got %q", n.EventFace)
+	}
+}
+
+// L2/L3 wiring: a session with a file tool_call persists recent.json (daily
+// counts, file recency) and traits.json (lifetime distributions).
+func TestTick_PersistsLayer2And3(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
+
+	d := New(cfg)
+	d.Tick() // attach at end
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","timestamp":"2026-05-31T10:00:01.000Z","message":{"content":[{"type":"tool_use","id":"e","name":"Read","input":{"file_path":"/x/main.go"}}]}}` + "\n")
+	f.Close()
+	d.Tick()
+
+	if _, err := os.Stat(cfg.RecentPath()); err != nil {
+		t.Errorf("recent.json should be written: %v", err)
+	}
+	if _, err := os.Stat(cfg.TraitsPath()); err != nil {
+		t.Errorf("traits.json should be written: %v", err)
+	}
+	if d.recent.Today(d.lastEventTS).Files != 1 {
+		t.Errorf("Layer 2 should count 1 file today, got %d", d.recent.Today(d.lastEventTS).Files)
+	}
+	if d.traits.FileTotal["/x/main.go"] != 1 {
+		t.Errorf("Layer 3 should count the file touch, got %+v", d.traits.FileTotal)
+	}
+	if d.recent.MarkSession(d.lastEventTS) { // already marked this session → not first now
+		t.Error("session should have been marked on the first event")
+	}
+}
+
+// Vocabulary evolution: a text prompt is harvested into the lexicon, and the
+// raw text is STRIPPED from events.log (privacy).
+func TestTick_HarvestsPromptIntoLexicon(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"seed"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
+
+	d := New(cfg)
+	d.Tick() // attach at end
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"user","timestamp":"2026-05-31T00:00:01.000Z","message":{"role":"user","content":"yeah lets ship /secret/path lol"}}` + "\n")
+	f.Close()
+	d.Tick()
+
+	if d.lexicon.Prompts != 1 {
+		t.Errorf("prompt should be harvested, got %d prompts", d.lexicon.Prompts)
+	}
+	if d.lexicon.Flavor["ship"] != 1 || d.lexicon.Flavor["lol"] != 1 {
+		t.Errorf("flavor words should be counted, got %+v", d.lexicon.Flavor)
+	}
+	b, _ := os.ReadFile(cfg.EventsPath())
+	if strings.Contains(string(b), "secret") || strings.Contains(string(b), "\"text\"") {
+		t.Errorf("raw prompt text must be stripped from events.log:\n%s", b)
+	}
+}
+
+// Token burn (Layer 1): a usage event surfaces as TokenBurn in now.json.
+func TestTick_TokenBurn(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
+
+	d := New(cfg)
+	d.Tick()
+	// burn is measured over the last 2 wall-clock minutes, so the event must be
+	// ~now (in production the transcript is tailed in real time).
+	ts := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","timestamp":"` + ts + `","message":{"role":"assistant","content":[{"type":"text"}],"usage":{"output_tokens":2000}}}` + "\n")
+	f.Close()
+	d.Tick()
+
+	n, _ := state.ReadNow(cfg.NowPath())
+	if n.TokenBurn <= 0 {
+		t.Errorf("a usage event should produce a positive token burn, got %v", n.TokenBurn)
+	}
+}
+
+// Decorations: a passing test fires a sparkle ✦ in now.json (pet-decorations).
+func TestTick_DecorationSparkleOnTestPass(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
+
+	d := New(cfg)
+	d.Tick()
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","timestamp":"2026-05-31T00:00:01.000Z","message":{"content":[{"type":"tool_use","id":"tp","name":"Bash","input":{"command":"go test ./..."}}]}}` + "\n")
+	f.WriteString(`{"type":"user","timestamp":"2026-05-31T00:00:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"tp"}]}}` + "\n")
+	f.Close()
+	d.Tick()
+
+	n, _ := state.ReadNow(cfg.NowPath())
+	if n.Decor != "✦" {
+		t.Errorf("a passing test should sparkle ✦, got Decor=%q", n.Decor)
+	}
+}
+
+// World: with a known terminal width, the daemon places the dog at a column and
+// spawns at least the edge-anchored sun/moon scenery.
+func TestTick_World(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr, Cols: 120})
+
+	d := New(cfg)
+	d.Tick()
+	d.Tick()
+	n, _ := state.ReadNow(cfg.NowPath())
+	if len(n.Scenery) == 0 {
+		t.Error("a wide terminal should have scenery (at least the sun/moon)")
+	}
+	if n.Heading == "" {
+		t.Error("heading should be set in the world")
+	}
+	if n.Pos < 0 || n.Pos > 90 {
+		t.Errorf("dog position should be within usable width, got %d", n.Pos)
+	}
+}
+
+// World: a running subagent becomes a robot in subagents.json.
+func TestTick_SubagentRobot(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	tr := tmp + "/t.jsonl"
+	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr, Cols: 120})
+
+	d := New(cfg)
+	d.Tick()
+	f, _ := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"type":"assistant","timestamp":"2026-05-31T00:00:01.000Z","message":{"content":[{"type":"tool_use","id":"ag1","name":"Agent","input":{"subagent_type":"Explore"}}]}}` + "\n")
+	f.Close()
+	d.Tick()
+
+	subs := state.ReadSubagents(cfg.SubagentsPath())
+	if len(subs) != 1 || subs[0].Status != "running" {
+		t.Fatalf("an open Agent should be one running robot, got %+v", subs)
+	}
+}
+
+// #2: a daemon only "owns" the lock when the file holds its own PID — the basis
+// for an orphaned instance standing down instead of racing now.json.
+func TestOwnsLock(t *testing.T) {
+	p := t.TempDir() + "/daemon.lock"
+	os.WriteFile(p, []byte(itoa(os.Getpid())), 0o644)
+	if !ownsLock(p) {
+		t.Error("our own PID → owns the lock")
+	}
+	os.WriteFile(p, []byte("999999999"), 0o644)
+	if ownsLock(p) {
+		t.Error("a different PID → does not own the lock")
+	}
+	os.Remove(p)
+	if ownsLock(p) {
+		t.Error("no lock file → does not own the lock")
+	}
+}
+
+// pet-world §3: the dog drifts in SHORT local hops within a central band (never
+// to the walls), and biases toward the ⚙ while a tool runs.
+func TestPickTarget_LocalDriftAndGear(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{StateDir: tmp + "/state"}
+	cfg.EnsureStateDir()
+	d := New(cfg)
+	// idle drift from mid-band: short hops (±10) that never hit a wall.
+	for i := 0; i < 60; i++ {
+		got := d.pickTarget(60, 30, "idle") // band [10,50]
+		if got == 0 || got == 60 {
+			t.Errorf("idle drift must avoid the walls, got %d", got)
+		}
+		if got < 20 || got > 40 {
+			t.Errorf("an idle hop from 30 should be local (±10), got %d", got)
+		}
+	}
+	// while a tool runs, hops bias toward the ⚙ (here to the right of the dog).
+	d.sceneryM["gear"] = &world.Scenery{Glyph: "⚙", Pos: 50}
+	for i := 0; i < 30; i++ {
+		got := d.pickTarget(60, 20, "tool_running")
+		if got <= 20 {
+			t.Errorf("during a tool the dog should drift toward the ⚙ (right of 20), got %d", got)
+		}
+		if got-20 > 10 {
+			t.Errorf("a hop should stay short (≤10), got %d from 20", got)
+		}
 	}
 }
 
