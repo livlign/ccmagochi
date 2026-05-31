@@ -36,12 +36,10 @@ type Now struct {
 	OpenToolMs  int64   `json:"open_tool_ms"`  // age of oldest open tool (warning escalation)
 	EventFace   string  `json:"event_face"`    // transient dev-event reaction: skeptical|disapproving|satisfied|""
 	TokenBurn   float64 `json:"token_burn"`    // output tokens/min over a recent window (Layer 1)
-	Favored     bool    `json:"favored"`       // current hour ≈ the pet's seeded preferred hour
 	Greeting    bool    `json:"greeting"`      // paw-up greeting (after a prompt / session start)
 	Bark        string  `json:"bark"`          // transient bark text beside the dog ("" = silent)
 	Decor       string  `json:"decor"`         // the single active mood symbol (zZ/…/♥/✦/;/'…) ("" = none)
 	Sound       string  `json:"sound"`         // italic sound emission (*huff* etc.) ("" = none)
-	Tint        string  `json:"tint"`          // rare background tint name (gold/pink) ("" = none)
 	// Layer 3 — world (pet-world.md): the dog's column + anchored scenery/ambient
 	Pos     int             `json:"pos"`     // dog's column within usable width
 	Heading string          `json:"heading"` // right|left|still (derived from target)

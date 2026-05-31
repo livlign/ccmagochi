@@ -92,8 +92,6 @@ type Daemon struct {
 	decorExpiry                                                             int64
 	curSound                                                                string
 	soundExpiry, lastSoundMs                                                int64
-	curTint                                                                 string
-	tintExpiry, lastTintMs                                                  int64
 	lastAlertMs, lastConfuseMs, lastSparkleMs, lastAffectionMs, lastAlarmMs int64
 	sparkleCount, affectionCount, alarmCount                                int // per-session caps
 	// world (pet-world.md) — the dog's column among anchored scenery + robots
@@ -550,12 +548,10 @@ func (d *Daemon) Tick() {
 		StateHeldMs: stateHeld, LastTool: d.lastTool, OpenToolMs: openToolMs,
 		EventFace: d.eventFace, Remark: d.curRemark,
 		TokenBurn: burn,
-		Favored:   d.quirks.PreferredHour == now.Hour(),
 		Greeting:  nowMs < d.greetUntil,
 		Bark:      d.curBark,
 		Decor:     d.decorOut(act, nowMs),
 		Sound:     d.curSound,
-		Tint:      d.curTint,
 		Pos:       d.pos,
 		Heading:   d.heading,
 		Scenery:   scenery,
@@ -610,19 +606,16 @@ func annDaysIf(ok bool, days int) int {
 	return 0
 }
 
-// resolveDecor picks the transient mood symbol + sound + rare background tint
-// (pet-decorations.md), enforcing per-category cooldowns and per-session caps.
-// Silence is the default — most ticks nothing fires. Sustained symbols (zZ/…/♪)
-// are computed in decorOut; this handles the punctuated, capped ones.
+// resolveDecor picks the transient mood symbol + sound (pet-decorations.md),
+// enforcing per-category cooldowns and per-session caps. Silence is the default
+// — most ticks nothing fires. Sustained symbols (zZ/…/♪) are computed in
+// decorOut; this handles the punctuated, capped ones.
 func (d *Daemon) resolveDecor(nowMs int64, act string, errFlash, doneFlash, testPass, committed, reverted bool) {
 	if d.curDecor != "" && nowMs > d.decorExpiry {
 		d.curDecor = ""
 	}
 	if d.curSound != "" && nowMs > d.soundExpiry {
 		d.curSound = ""
-	}
-	if d.curTint != "" && nowMs > d.tintExpiry {
-		d.curTint = ""
 	}
 	set := func(sym string, dur int64) { d.curDecor, d.decorExpiry = sym, nowMs+dur }
 	_, anniversary := d.traits.AnniversaryDays(nowMs)
@@ -636,9 +629,6 @@ func (d *Daemon) resolveDecor(nowMs int64, act string, errFlash, doneFlash, test
 	case anniversary && nowMs-d.lastSparkleMs > 300000 && d.sparkleCount < 5:
 		set("✨", 4000)
 		d.lastSparkleMs, d.sparkleCount = nowMs, d.sparkleCount+1
-		if nowMs-d.lastTintMs > 1800000 { // gold milestone tint, ≤1/30min
-			d.curTint, d.tintExpiry, d.lastTintMs = "gold", nowMs+4000, nowMs
-		}
 	case (testPass || committed) && nowMs-d.lastSparkleMs > 300000 && d.sparkleCount < 5:
 		set("✦", 4000)
 		d.lastSparkleMs, d.sparkleCount = nowMs, d.sparkleCount+1
