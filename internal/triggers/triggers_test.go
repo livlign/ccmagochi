@@ -22,16 +22,22 @@ func TestEval_SilentWhenNothingFires(t *testing.T) {
 	}
 }
 
-func TestEval_RespectsCap(t *testing.T) {
+// There is no per-session remark cap: the long-lived daemon must stay talkative
+// across an entire session, so Eval keeps firing as long as a category is
+// eligible (gated only by cooldown and recency, never a running total).
+func TestEval_NoRemarkCap(t *testing.T) {
 	p := persona.Default()
-	p.RemarkCap = 1
 	p.CooldownTurns = 0
+	p.RecencyWindow = 0 // isolate the cap question from repetition avoidance
 	e := NewEngine(p, persona.DefaultVocab(), nil, nil, 1)
-	if _, text := e.Eval(View{ToolMaxMs: 99999}); text == "" {
-		t.Fatal("first remark should fire")
+	fired := 0
+	for i := 0; i < 200; i++ {
+		if _, text := e.Eval(View{ToolMaxMs: 99999}); text != "" {
+			fired++
+		}
 	}
-	if _, text := e.Eval(View{LocalHour: 3}); text != "" {
-		t.Fatalf("cap=1 should block the second remark, got %q", text)
+	if fired < 50 {
+		t.Fatalf("no cap should keep the pet talking; only fired %d/200", fired)
 	}
 }
 
@@ -96,7 +102,6 @@ func TestEval_ImprovisesVariety(t *testing.T) {
 	p.CooldownTurns = 0
 	p.AmbientCooldownTurns = 0 // late_hour is ambient; disable cooldown for the variety check
 	p.RecencyWindow = 0        // don't let recency hide the variety
-	p.RemarkCap = 1000
 	e := NewEngine(p, persona.DefaultVocab(), persona.DefaultGrammar(), nil, 7)
 	seen := map[string]bool{}
 	for i := 0; i < 60; i++ {

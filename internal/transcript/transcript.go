@@ -204,7 +204,7 @@ func (c *Classifier) OpenAgents() int {
 func (c *Classifier) OpenTools() int { return len(c.openTools) }
 
 // OpenAgentIDs returns the tool_use ids of currently-running subagents (open
-// Agent calls) — drives the world's robot companions.
+// Agent calls) — drives the agent companions shown beside the dog.
 func (c *Classifier) OpenAgentIDs() []string {
 	var ids []string
 	for id, t := range c.openTools {

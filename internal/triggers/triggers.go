@@ -33,6 +33,7 @@ type View struct {
 	JustAversion     bool
 	JustError        bool // a tool just errored (spoken reaction)
 	HeavyBurn        bool // output tokens/min is high (Layer 1)
+	IsWorking        bool // a tool is running that isn't an edit/read (Bash, build, git…)
 	PaceAnomaly      bool // within-session: pace doubled vs earlier
 	// Layer 2 — recent / cross-session
 	FirstSessionToday bool
@@ -65,6 +66,9 @@ var ambientCats = map[string]bool{
 	"pace_anomaly": true, "usual_break": true, "long_gap": true,
 	"anniversary": true, "favorite_repo": true,
 	"quirk_revert_commit": true, "quirk_reads_writes": true,
+	// narration-grade signals: true facts, but they change tick-to-tick, so a
+	// short cooldown turns them into spam. Ambient cooldown makes them occasional.
+	"heavy_burn": true, "busy": true, "many_files": true, "working": true,
 }
 
 type Engine struct {
@@ -72,7 +76,6 @@ type Engine struct {
 	vocab    persona.Vocab
 	grammar  persona.Grammar
 	recent   []string       // recent remark texts (repetition avoidance)
-	count    int            // remarks this session
 	lastTurn map[string]int // category -> turn it last fired
 	turn     int
 	rng      *rand.Rand
@@ -92,9 +95,6 @@ func NewEngine(p persona.Persona, vocab persona.Vocab, grammar persona.Grammar, 
 // Eval is called once per daemon tick. Returns (category, text) or ("","").
 func (e *Engine) Eval(v View) (string, string) {
 	e.turn++
-	if e.count >= e.p.RemarkCap {
-		return "", ""
-	}
 	// ordered candidates; first eligible wins. Dev events and live activity rank
 	// above slow context, so the pet reacts to what you're doing now first.
 	cands := []struct {
@@ -110,7 +110,6 @@ func (e *Engine) Eval(v View) (string, string) {
 		{"aversion", v.JustAversion},
 		{"editing", v.IsEditing},
 		{"reading", v.IsReading},
-		{"heavy_burn", v.HeavyBurn},
 		{"long_thinking", v.ThinkMaxMs > e.p.LongThinkingMs},
 		{"long_tool_call", v.ToolMaxMs > e.p.LongToolCallMs},
 		{"same_file_repeat", v.MaxFileRepeat >= e.p.SameFileRepeat},
@@ -138,6 +137,10 @@ func (e *Engine) Eval(v View) (string, string) {
 		{"weekend_now", v.WeekendPhase == "now"},
 		{"late_hour", v.LocalHour < 5 || v.LocalHour >= 23},
 		{"delegating", v.JustDelegated},
+		// lowest priority: narration fillers. They only speak when nothing more
+		// interesting is eligible, and (being ambient) rarely even then.
+		{"heavy_burn", v.HeavyBurn},
+		{"working", v.IsWorking},
 	}
 	for _, c := range cands {
 		if !c.ok {
@@ -155,7 +158,6 @@ func (e *Engine) Eval(v View) (string, string) {
 			continue
 		}
 		e.lastTurn[c.cat] = e.turn
-		e.count++
 		e.recent = append(e.recent, text)
 		if len(e.recent) > e.p.RecencyWindow {
 			e.recent = e.recent[len(e.recent)-e.p.RecencyWindow:]

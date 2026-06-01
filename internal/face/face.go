@@ -14,8 +14,8 @@
 //
 // Transitions (pet-01-dog §14): the dog never snaps between states. A change is
 // masked by one intermediate frame — a blink on a mood (eye) swap, a "˙" dot on
-// ears emerging/retracting, a "·" dot on the tail appearing/tucking, a still
-// frame while turning. Errors, alarms and greetings snap (no smoothing). Because
+// ears emerging/retracting, a "·" dot on the tail appearing/tucking. Errors,
+// alarms and greetings snap (no smoothing). Because
 // the renderer is a fresh process each refresh, the previous frame's signature
 // is persisted (frame.json) and compared on the next render via PickFrame.
 package face
@@ -28,7 +28,7 @@ import (
 
 const reset = "\x1b[0m"
 const snout = "ᴥ" // THE signature character — never substituted
-const maxWidth = 14
+const maxWidth = 16 // body + emissions; +2 over the bare face to cover the snout-flanking spaces
 
 // badgeOpen paints the dog's anatomy: bright-white background, black foreground
 // (decorations §2). Fixed — it never changes with state. Closed with reset.
@@ -278,14 +278,11 @@ func idleOverlay(n state.Now, mood string, tick int64) overlay {
 // --- anatomy & composition --------------------------------------------------
 
 // anatomy is the resolved dog for one frame. tailMode lets a transition frame
-// override the tail: auto (compute from mood), dot ("·"), or hidden. heading
-// selects the body view — "still" shows the front face, "right"/"left" show the
-// side-profile walking sprite.
+// override the tail: auto (compute from mood), dot ("·"), or hidden.
 type anatomy struct {
 	mood                   string
 	eyeL, eyeR, earL, earR string
 	pre, post              string
-	heading                string
 	paw                    bool
 	tailMode               int // 0=auto, 1=dot, 2=hidden
 }
@@ -296,15 +293,6 @@ const (
 	tailHidden
 )
 
-// The walking dog turns to a side profile (head leading, tail trailing) — a
-// deliberate exception to the front-facing signature, shown only while moving.
-// Head faces the direction of travel; the tail ϟ trails behind. (Front face,
-// snout and parens return the moment it stops — see composeDog.)
-const (
-	spriteLeft  = "⊂°≡≡≡ϟ" // walking left: head ⊂° leads left, tail ϟ trails right
-	spriteRight = "ϟ≡≡≡°⊃" // walking right: head °⊃ leads right, tail ϟ trails left
-)
-
 // baseAnat resolves the dog's Layer-1 look for the current state — no idle
 // overlay, no heartbeat blink, no transition. This is the "target" the
 // transition system compares against and smooths toward.
@@ -312,7 +300,7 @@ func baseAnat(n state.Now) anatomy {
 	mood := dogMood(n)
 	eL, eR := eyes(mood)
 	aL, aR := ears(n, mood)
-	return anatomy{mood: mood, eyeL: eL, eyeR: eR, earL: aL, earR: aR, paw: n.Greeting, heading: headingOf(n)}
+	return anatomy{mood: mood, eyeL: eL, eyeR: eR, earL: aL, earR: aR, paw: n.Greeting}
 }
 
 // liveAnat is baseAnat plus the Layer-2 overlay (sparse idle/long-running
@@ -351,25 +339,17 @@ func liveAnat(n state.Now, tick int64, talking bool) anatomy {
 // The badge (white bg / dark fg) wraps ONLY the body; bark, mood symbol and
 // sound render unframed outside it (decorations §2).
 //
-// Two body views: standing still (or talking/greeting) shows the front FACE
-// — the signature ears(eyeᴥeye)ears — with decorations on the right (a bark
-// taking the tail's slot, legacy). Walking shows the side-profile SPRITE
-// (pet-01-dog §11): head leads the direction of travel, the tail ϟ is built in,
-// and any bark/symbol emits in front. Visible width (badge escapes excluded) is
-// capped at maxWidth — emissions drop once it's hit. A sentence is uncapped.
+// The dog always faces front — the signature ears(eye ᴥ eye)ears — with
+// decorations on the right (a bark taking the tail's slot). Visible width (badge
+// escapes excluded) is capped at maxWidth — emissions drop once it's hit. A
+// spoken sentence is uncapped and suppresses the decorations.
+//
+// A single space flanks the snout (eye ᴥ eye). It's load-bearing: wide eye
+// glyphs (◔ ◉ ʘ O ★ ♥) are East-Asian-ambiguous width and many terminal fonts
+// draw them wider than one cell, so without the gap the left eye bleeds into the
+// snout. The space keeps every mood's eyes clear of it.
 func composeDog(n state.Now, a anatomy, tick int64, remark string) string {
-	walking := remark == "" && !a.paw && (a.heading == "right" || a.heading == "left")
-
-	var visBody string
-	if walking {
-		if a.heading == "left" {
-			visBody = fb(spriteLeft)
-		} else {
-			visBody = fb(spriteRight)
-		}
-	} else {
-		visBody = fb(a.earL) + "(" + a.pre + fb(a.eyeL) + snout + fb(a.eyeR) + a.post + ")" + fb(a.earR)
-	}
+	visBody := fb(a.earL) + "(" + a.pre + fb(a.eyeL) + " " + snout + " " + fb(a.eyeR) + a.post + ")" + fb(a.earR)
 	body := badgeOpen + visBody + reset
 
 	if remark != "" {
@@ -380,7 +360,7 @@ func composeDog(n state.Now, a anatomy, tick int64, remark string) string {
 	}
 
 	w := vis(visBody)
-	left, right := "", ""
+	right := ""
 	addRight := func(s string) bool {
 		if s == "" || w+1+vis(s) > maxWidth {
 			return false
@@ -389,57 +369,31 @@ func composeDog(n state.Now, a anatomy, tick int64, remark string) string {
 		w += 1 + vis(s)
 		return true
 	}
-	addLeft := func(s string) bool {
-		if s == "" || w+1+vis(s) > maxWidth {
-			return false
-		}
-		left = s + " " + left
-		w += 1 + vis(s)
-		return true
-	}
 
-	switch {
-	case walking && a.heading == "left": // emissions lead left (the sprite's tail is built in)
-		placeFront(n, addLeft)
-	case walking: // heading right — emissions lead right
-		placeFront(n, addRight)
-	default: // still front face: everything on the right; a bark takes the tail's slot
-		var tl string
-		switch a.tailMode {
-		case tailDot:
-			tl = "·"
-		case tailHidden:
-			tl = ""
-		default:
-			tl = fb(tail(n, a.mood, tick))
-		}
-		if n.Bark != "" {
-			addRight(n.Bark)
-		} else {
-			addRight(tl)
-		}
-		if n.Decor != "" && n.Bark == "" { // bark wins over a mood symbol
-			addRight(fb(n.Decor))
-		}
-		addRight(n.Sound)
+	var tl string
+	switch a.tailMode {
+	case tailDot:
+		tl = "·"
+	case tailHidden:
+		tl = ""
+	default:
+		tl = fb(tail(n, a.mood, tick))
 	}
+	if n.Bark != "" {
+		addRight(n.Bark)
+	} else {
+		addRight(tl)
+	}
+	if n.Decor != "" && n.Bark == "" { // bark wins over a mood symbol
+		addRight(fb(n.Decor))
+	}
+	addRight(n.Sound)
 
-	out := left + body + right
-	if left != "" || right != "" {
+	out := body + right
+	if right != "" {
 		out += reset // decorations are plain; guard the line end with a reset
 	}
 	return out
-}
-
-// placeFront emits the "front" decorations onto one side, in priority order: a
-// bark wins over a mood symbol (§7), then a sound. Stops at the width cap.
-func placeFront(n state.Now, add func(string) bool) {
-	if n.Bark != "" {
-		add(n.Bark)
-	} else if n.Decor != "" {
-		add(fb(n.Decor))
-	}
-	add(n.Sound)
 }
 
 // canBlink reports whether a mood's eyes should blink. Excludes already-closed
@@ -463,30 +417,21 @@ type Frame struct {
 	Mood    string `json:"mood"`
 	Ears    bool   `json:"ears"`
 	Tail    bool   `json:"tail"`
-	Heading string `json:"heading"`
 	Pending bool   `json:"pending"`
 }
 
-func headingOf(n state.Now) string {
-	if n.Heading == "" {
-		return "still"
-	}
-	return n.Heading
-}
-
 // sigOf is the target signature for the current state (ignores overlay/blink,
-// which don't change the underlying mood/ears/tail/heading).
+// which don't change the underlying mood/ears/tail).
 func sigOf(n state.Now, a anatomy) Frame {
 	return Frame{
-		Mood:    a.mood,
-		Ears:    a.earL != "" || a.earR != "",
-		Tail:    tail(n, a.mood, 0) != "",
-		Heading: headingOf(n),
+		Mood: a.mood,
+		Ears: a.earL != "" || a.earR != "",
+		Tail: tail(n, a.mood, 0) != "",
 	}
 }
 
 func sameSig(a, b Frame) bool {
-	return a.Mood == b.Mood && a.Ears == b.Ears && a.Tail == b.Tail && a.Heading == b.Heading
+	return a.Mood == b.Mood && a.Ears == b.Ears && a.Tail == b.Tail
 }
 
 // snaps reports state changes that must NOT be smoothed — errors, alarms and
@@ -498,19 +443,14 @@ func snaps(n state.Now, a anatomy) bool {
 // transitionAnat returns the masked intermediate anatomy for a smoothable
 // change prev→target, and true if one applies. Priority per §14: a combined
 // blink+ear frame for an event (eyes and ears both change), else a blink, an
-// ear dot, a tail dot, or a still frame (turning).
+// ear dot, or a tail dot.
 func transitionAnat(prev Frame, n state.Now, target anatomy) (anatomy, bool) {
 	cur := sigOf(n, target)
 	moodCh := prev.Mood != cur.Mood && canBlink(cur.Mood)
 	earCh := prev.Ears != cur.Ears
 	tailCh := prev.Tail != cur.Tail
-	headCh := prev.Heading != cur.Heading
 	a := target
 	switch {
-	case headCh:
-		// Turn through the front face for one frame (§14): bridges still→walk and
-		// left↔right swaps so the body doesn't snap between views.
-		a.heading, a.tailMode = "still", tailHidden
 	case moodCh && earCh:
 		a.eyeL, a.eyeR, a.earL, a.earR = "-", "-", "˙", "˙" // ˙(-ᴥ-)˙ event combo
 	case moodCh:
@@ -553,8 +493,6 @@ func PickFrame(n state.Now, tick int64, remark string, prev Frame) (string, Fram
 
 var fallbackPairs = [][2]string{
 	{"≡", "="}, {"︶", ","}, {"ᶺ", "ʌ"}, {"⌒", "~"}, {"ʘ", "◉"}, {"★", "*"}, {"♥", "<3"},
-	// walking-sprite glyphs
-	{"⊂", "<"}, {"⊃", ">"}, {"°", "o"}, {"ϟ", "~"},
 }
 
 func fb(s string) string {

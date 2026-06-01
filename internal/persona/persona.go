@@ -14,7 +14,6 @@ type Persona struct {
 	ManyFiles      int   `json:"many_files"`
 	SameFileRepeat int   `json:"same_file_repeat"`
 	IdleSeconds    int64 `json:"idle_seconds"`
-	RemarkCap      int   `json:"remark_cap"`     // per session
 	CooldownTurns  int   `json:"cooldown_turns"` // per trigger category
 	// AmbientCooldownTurns is the (much longer) cooldown for slow-changing
 	// context remarks — weekend, late hour. These facts don't change minute to
@@ -35,7 +34,6 @@ func Default() Persona {
 		// With the heartbeat (v1.5), turnActive handles in-turn silence and idle
 		// becomes responsive (~60s) post-turn; this 300s only guards no-hook sessions.
 		// v1.6 — talkative (overrides idea.md "silence is default"; tune in persona.json):
-		RemarkCap:            40,
 		CooldownTurns:        3,
 		AmbientCooldownTurns: 1800, // ~30 min at ~1 tick/s — weekend/late-hour say rarely
 		RecencyWindow:        20,
@@ -64,6 +62,7 @@ func DefaultVocab() Vocab {
 		"editing":          {"On it — editing %d files…", "Heads down, %d files in flight…", "Working through %d files…", "Editing away — %d so far…"},
 		"reading":          {"Reading through %d files…", "Skimming %d files…", "Having a look — %d files…", "Catching up on %d files…"},
 		"busy":             {"Lots of moving parts this session!", "Plenty in flight right now.", "Busy stretch — lots going on."},
+		"working":          {"Heads down over here…", "Still at it…", "Plugging away…", "In the weeds…"},
 		"many_files":       {"That's a fair few files this session.", "Lots of files open.", "Quite a few files this session."},
 		// #3: day-aware weekend (never says "Friday" on a Sunday)
 		"weekend_eve": {"Friday — winding down?", "Almost the weekend!", "Weekend's nearly here.", "Friday already, huh?"},

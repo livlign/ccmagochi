@@ -3,21 +3,30 @@
 package daemon
 
 import (
-	"os"
 	"os/exec"
 	"syscall"
 )
 
-// processAlive: best-effort on Windows — if FindProcess + Signal(0) errors, treat dead.
+// processAlive reports whether pid names a live process. On Windows,
+// (*os.Process).Signal(0) returns "not supported by windows" even for live
+// processes, so we query the OS directly: open the process and ask whether its
+// wait handle is still unsignaled (WAIT_TIMEOUT = still running).
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	p, err := os.FindProcess(pid)
+	const synchronize = 0x00100000  // SYNCHRONIZE — required to wait on the handle
+	const waitTimeout = 0x00000102 // STATUS_TIMEOUT — handle not signaled → alive
+	h, err := syscall.OpenProcess(synchronize, false, uint32(pid))
+	if err != nil {
+		return false // no such process (or no rights) → treat as dead
+	}
+	defer syscall.CloseHandle(h)
+	ev, err := syscall.WaitForSingleObject(h, 0)
 	if err != nil {
 		return false
 	}
-	return p.Signal(syscall.Signal(0)) == nil
+	return ev == waitTimeout
 }
 
 const detachedProcess = 0x00000008 // DETACHED_PROCESS

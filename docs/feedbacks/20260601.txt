@@ -1,0 +1,44 @@
+Installed and verified working. The final render shows both lines correctly:
+  - Line 1 — the pet (•ᴥ•) in its world
+  - Line 2 — your existing Python status line, intact: D:/claude/ccmagotchi | Opus 4.8 | Ctx: 42%
+  - (Line 3 is your script's background-task detector catching this session's own shell output — it'll show real background tasks in normal
+  use.)
+
+  What I did
+
+  Install steps
+  1. Installed Go 1.26.3 via winget (wasn't present; required to build — it's pure Go source with no prebuilt binary).
+  2. Built D:\claude\ccmagotchi\bin\ccmagotchi.exe.
+  3. Wrote C:\Users\TranTuanLinh\.ccmagotchi\config.json preserving your Python status line as base_status_command (with backslash paths,
+  which Windows cmd needs).
+  4. Pointed C:\Users\TranTuanLinh\.claude\settings.json statusLine → ccmagotchi.exe render with refreshInterval: 1. The daemon auto-spawns;
+  the pet renders above your existing line.
+
+  Two Windows portability fixes were required (the repo was mid-development with Windows paths stubbed out). You approved the first; the
+  second was the same class of issue:
+  - render.go:138 — base command ran via sh -c (not on this machine). Now cmd /c on Windows. Without this, your Python status line silently
+  vanishes.
+  - spawn_windows.go — processAlive used os.Process.Signal(0), which is unsupported on Windows and always reports "dead." That defeated the
+  single-instance guard, so every 1-second render spawned a fresh daemon. Now uses OpenProcess(SYNCHRONIZE) + WaitForSingleObject. Verified:
+  exactly one stable daemon now (PID held steady across 16s; the daemon test suite passes).
+
+  Worth knowing
+
+  - These two source edits are uncommitted in your working tree. They're genuine cross-platform bug fixes and the build depends on them — if
+  you rebuild after a git checkout, it breaks. Want me to commit them?
+  - 3 render unit tests still "fail" on Windows — they hard-code Unix shell fixtures (echo, cat | sed). Two of them now actually exercise the
+  working cmd /c path; they just assert against Unix echo output. They pass on the project's native Unix/CI. I left them as-is (rewriting Unix
+  fixtures was out of scope).
+  - Restart Claude Code to pick up the new statusLine cleanly.
+
+  One small note: your statusline.py takes ~1s per render (it runs powershell Get-NetTCPConnection/Get-Process for background-task detection),
+  so at refreshInterval: 1 you'll briefly see 2-3 overlapping render processes. That's your existing script's pre-existing cost, self-bounded
+  by its 3s cache — harmless, but if you want a lighter status line, bumping refreshInterval to 2 would reduce the overlap.
+
+-----
+
+The dog face looks better than moving part. Should be focus on the face motion only, remove the world specs. i.e. the face always show, occasionally talk with user to provide useful information, small talks, ambient text, barks,...
+
+-----
+
+

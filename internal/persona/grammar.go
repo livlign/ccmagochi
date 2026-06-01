@@ -66,6 +66,12 @@ func DefaultGrammar() Grammar {
 			{"That's a fair few files", "Lots of files", "Quite a few files"},
 			{" this session", " open", "…"},
 		},
+		// generic "a tool is running" filler for stretches that aren't edits/reads
+		// (Bash, builds, git) — fills the dead air without narrating token output.
+		"working": {
+			{"Heads down", "Still at it", "Plugging away", "In the weeds", "Hard at work"},
+			{"…", " over here…", " — focused", "."},
+		},
 		"commit": {
 			{"Shipped", "Committed", "Locked it in", "Another one in the books", "Saved"},
 			{"!", " — clean", " — nice one", ". git's happy."},

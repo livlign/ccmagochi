@@ -135,22 +135,6 @@ func TestTail_VisibilityAndWag(t *testing.T) {
 	}
 }
 
-// Walking turns the dog to a side profile (head leads travel, tail trails);
-// standing still restores the front signature face (pet-01-dog §11).
-func TestPick_WalkingSprite(t *testing.T) {
-	base := state.Mood{Energy: 0.6, Stress: 0.5}
-	if r := Pick(state.Now{Activity: "idle", Heading: "right", Mood: base}, 2, ""); !strings.Contains(r, spriteRight) {
-		t.Errorf("walking right → right-facing sprite, got %q", r)
-	}
-	if l := Pick(state.Now{Activity: "idle", Heading: "left", Mood: base}, 2, ""); !strings.Contains(l, spriteLeft) {
-		t.Errorf("walking left → left-facing sprite, got %q", l)
-	}
-	s := Pick(state.Now{Activity: "idle", Heading: "still", Mood: base}, 2, "")
-	if !strings.Contains(s, snout) || strings.Contains(s, spriteLeft) {
-		t.Errorf("standing still → front face with the snout, got %q", s)
-	}
-}
-
 // The paw greeting suppresses the tail and faces the user.
 func TestPick_GreetingPaw(t *testing.T) {
 	out := Pick(state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6}, Greeting: true}, 1, "")
@@ -205,7 +189,7 @@ func TestPick_Blinks(t *testing.T) {
 	n := state.Now{Activity: "idle", Mood: state.Mood{Energy: 0.6, Stress: 0.5}} // neutral
 	open, closed := 0, 0
 	for tk := int64(0); tk < 14; tk++ {
-		if strings.Contains(Pick(n, tk, ""), "(-ᴥ-)") {
+		if strings.Contains(Pick(n, tk, ""), "(- ᴥ -)") {
 			closed++
 		} else {
 			open++
@@ -265,7 +249,7 @@ func TestPick_DecorAndBark(t *testing.T) {
 	}
 }
 
-// The 14-char cap drops the sound emission before the symbol.
+// The width cap drops the sound emission before the symbol.
 func TestPick_WidthCapDropsSound(t *testing.T) {
 	n := state.Now{Activity: "idle", Mood: state.Mood{Tiredness: 0.8}} // sleepy → tail ~
 	n.Decor = "zZ"
@@ -291,25 +275,25 @@ func TestPick_RemarkSuppressesDecor(t *testing.T) {
 // A mood (eye) change is masked by one blink frame, then lands on the target
 // (pet-01-dog §14). Error/alarm/greeting snap instead.
 func TestPickFrame_BlinkOnMoodChange(t *testing.T) {
-	prev := Frame{Mood: "neutral", Heading: "still"}
+	prev := Frame{Mood: "neutral"}
 	n := state.Now{Activity: "thinking"} // → mood "thinking" (eyes ◔), a smoothable swap
 	frame1, sig1 := PickFrame(n, 4, "", prev)
-	if !strings.Contains(frame1, "(-ᴥ-)") {
+	if !strings.Contains(frame1, "(- ᴥ -)") {
 		t.Errorf("a mood change should blink first, got %q", frame1)
 	}
 	if !sig1.Pending {
 		t.Error("the blink frame should mark Pending so the next render lands on target")
 	}
 	frame2, sig2 := PickFrame(n, 4, "", sig1) // even tick → looking-up frame of the dart
-	if !strings.Contains(frame2, "(◔ᴥ◔)") {
+	if !strings.Contains(frame2, "(◔ ᴥ ◔)") {
 		t.Errorf("the tick after the blink should show the target (thinking) mood, got %q", frame2)
 	}
 	if sig2.Pending || sig2.Mood != "thinking" {
 		t.Errorf("after landing, frame should be the settled target, got %+v", sig2)
 	}
 	// an error snaps — no blink intermediate
-	snapFrame, _ := PickFrame(state.Now{Tone: "error"}, 3, "", Frame{Mood: "neutral", Heading: "still"})
-	if !strings.Contains(snapFrame, "(OᴥO)") {
+	snapFrame, _ := PickFrame(state.Now{Tone: "error"}, 3, "", Frame{Mood: "neutral"})
+	if !strings.Contains(snapFrame, "(O ᴥ O)") {
 		t.Errorf("an error should snap straight to alarmed, got %q", snapFrame)
 	}
 }

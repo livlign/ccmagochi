@@ -24,7 +24,6 @@ import (
 	"ccmagotchi/internal/traits"
 	"ccmagotchi/internal/transcript"
 	"ccmagotchi/internal/triggers"
-	"ccmagotchi/internal/world"
 )
 
 // debug logging — gated behind CCMAGOTCHI_DEBUG=1, never ships to users.
@@ -94,17 +93,10 @@ type Daemon struct {
 	soundExpiry, lastSoundMs                                                int64
 	lastAlertMs, lastConfuseMs, lastSparkleMs, lastAffectionMs, lastAlarmMs int64
 	sparkleCount, affectionCount, alarmCount                                int // per-session caps
-	// world (pet-world.md) — the dog's column among anchored scenery + robots
-	worldRng     *rand.Rand
-	cols         int    // terminal COLUMNS (from session.json, set by the renderer)
-	pos, target  int    // dog column + wander target within usable width
-	heading      string // right|left|still
-	curFile      string // most-recent active file (→ 📄 scenery)
-	moveCooldown int    // ticks until the dog may step again
-	ambientIdx   int    // rotates the ambient caption
-	ambientUntil int64  // when to rotate next
-	subs         map[string]*state.Subagent
-	sceneryM     map[string]*world.Scenery // by kind (sun/tree/stone/gear/file) — stable positions
+	// rng drives the casual-bark dice; subs tracks the agent companions shown
+	// beside the dog while Claude delegates.
+	rng  *rand.Rand
+	subs map[string]*state.Subagent
 }
 
 // burnSample is one assistant message's output-token count at a moment.
@@ -148,10 +140,8 @@ func New(cfg config.Config) *Daemon {
 		recent:      rec,
 		traits:      tr,
 		lexicon:     lexicon.Load(cfg.LexiconPath()),
-		worldRng:    rand.New(rand.NewSource(time.Now().UnixNano())),
-		heading:     "still",
+		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
 		subs:        map[string]*state.Subagent{},
-		sceneryM:    map[string]*world.Scenery{},
 	}
 }
 
@@ -260,7 +250,6 @@ func (d *Daemon) Tick() {
 						}
 					}
 					if f, ok := e.Data["file"].(string); ok && f != "" {
-						d.curFile = f // most-recent active file → 📄 world scenery
 						// Layer 2: file recency BEFORE recent.Observe updates it.
 						if prev := d.recent.FileLastSeen(f); prev > 0 {
 							if gapH := int((e.TS - prev) / 3600000); gapH >= 4 {
@@ -407,8 +396,8 @@ func (d *Daemon) Tick() {
 			barkCandidate = "*pant*" // tired but focused (long stretch)
 		case d.revertStreak >= 2:
 			barkCandidate = "*hmph*" // unimpressed by the revert pattern
-		case act == "tool_running" && d.worldRng.Intn(45) == 0:
-			barkCandidate = []string{"ruff", "woof", "arf", "huff"}[d.worldRng.Intn(4)] // casual mid-work
+		case act == "tool_running" && d.rng.Intn(45) == 0:
+			barkCandidate = []string{"ruff", "woof", "arf", "huff"}[d.rng.Intn(4)] // casual mid-work
 		}
 	}
 	// state restrictions
@@ -455,6 +444,7 @@ func (d *Daemon) Tick() {
 			JustTestPass: justTestPass, JustTestFail: justTestFail,
 			IsEditing:        act == "tool_running" && isEditTool(d.lastTool),
 			IsReading:        act == "tool_running" && isReadTool(d.lastTool),
+			IsWorking:        act == "tool_running" && !isEditTool(d.lastTool) && !isReadTool(d.lastTool),
 			WeekendPhase:     weekendPhase(now.Weekday()),
 			JustFavoriteFile: favoriteFile,
 			JustAversion:     aversionHit,
@@ -541,7 +531,7 @@ func (d *Daemon) Tick() {
 		openToolMs = nowMs - om
 	}
 
-	scenery, ambient := d.worldTick(nowMs, act, now.Hour())
+	d.trackSubagents(nowMs)
 
 	state.WriteNow(d.cfg.NowPath(), state.Now{
 		Mood: d.m, Activity: act, Tone: tone,
@@ -552,10 +542,6 @@ func (d *Daemon) Tick() {
 		Bark:      d.curBark,
 		Decor:     d.decorOut(act, nowMs),
 		Sound:     d.curSound,
-		Pos:       d.pos,
-		Heading:   d.heading,
-		Scenery:   scenery,
-		Ambient:   ambient,
 	})
 }
 
@@ -691,234 +677,19 @@ func (d *Daemon) decorOut(act string, nowMs int64) string {
 
 const longToolDisplayMs = 30000 // ≈ persona LongToolCallMs (display threshold)
 
-// worldTick advances the world (pet-world.md): refreshes terminal width from the
-// renderer's session pointer, wanders the dog one step (mostly still), maintains
-// stable-positioned scenery, rotates ambient text, and writes subagents.json.
-// Returns the scenery + ambient caption for now.json.
-func (d *Daemon) worldTick(nowMs int64, act string, hour int) ([]world.Scenery, string) {
-	if s, err := state.ReadSession(d.cfg.SessionPath()); err == nil && s.Cols > 0 {
-		d.cols = s.Cols // COLUMNS lives in the renderer; it hands it to us here
-	}
-	usable := world.Usable(d.cols)
-	d.trackSubagents(nowMs, usable) // robots tracked even in compact (→ +N)
-	if usable < 12 {
-		d.pos, d.heading = 0, "still"
-		d.sceneryM = map[string]*world.Scenery{}
-		return nil, ""
-	}
-
-	const dogW = 9 // ≈ "≡(•ᴥ•)≡ ⌒" — enough margin to keep the dog on-screen
-	maxPos := usable - dogW
-	if maxPos < 0 {
-		maxPos = 0
-	}
-	if d.pos > maxPos {
-		d.pos = maxPos
-	}
-	dbgf("worldTick t=%d act=%q cols=%d usable=%d maxPos=%d pos=%d target=%d cd=%d", d.tickN, act, d.cols, usable, maxPos, d.pos, d.target, d.moveCooldown)
-
-	// Wander (pet-world §3): the dog walks visibly to a target — one column per
-	// tick while traveling — then rests when it arrives. Stillness lives between
-	// excursions (a 4-11 tick pause), not between steps, so the dog reads as
-	// walking over to scenery / the ⚙ rather than creeping a column every few
-	// seconds. Movement spans idle, thinking and active periods alike.
-	prevPos := d.pos
-	if d.moveCooldown > 0 {
-		d.moveCooldown--
-	}
-	if maxPos > 0 {
-		if d.pos == d.target {
-			// Arrived (or idle at rest): pause, then pick the next destination.
-			if d.moveCooldown == 0 {
-				d.target = d.pickTarget(maxPos, d.pos, act)
-				if d.target == d.pos {
-					d.moveCooldown = 4 + d.worldRng.Intn(8) // nowhere new — rest before reconsidering
-				} else {
-					dbgf("  target ASSIGN t=%d target=%d pos=%d", d.tickN, d.target, d.pos)
-				}
-			}
-		} else {
-			// Traveling: step one column toward the target every tick.
-			oldPos := d.pos
-			if d.target > d.pos {
-				d.pos++
-			} else {
-				d.pos--
-			}
-			dbgf("  pos MOVE t=%d %d -> %d (target=%d)", d.tickN, oldPos, d.pos, d.target)
-			if d.pos == d.target {
-				d.moveCooldown = 4 + d.worldRng.Intn(8) // arrived — rest before the next excursion
-			}
-		}
-	}
-	// Heading reflects the step ACTUALLY taken this tick, not the target — so a dog
-	// that isn't moving (resting, arrived, or boxed in) reads as "still" (front
-	// face) rather than a frozen walking pose. The side-profile sprite only shows
-	// while the dog is genuinely advancing.
-	switch {
-	case d.pos > prevPos:
-		d.heading = "right"
-	case d.pos < prevPos:
-		d.heading = "left"
-	default:
-		d.heading = "still"
-	}
-
-	// Scenery — stable positions, spawned once and kept while their condition holds.
-	moon := "🌙"
-	if hour >= 6 && hour < 18 {
-		moon = "🌞"
-	}
-	d.sceneryM["sun"] = &world.Scenery{Glyph: moon, Pos: usable - 3} // edge-anchored, re-set each tick
-	d.setScenery("tree", "🌲", usable, d.sessionStartWallMs > 0 && nowMs-d.sessionStartWallMs > 20*60*1000)
-	d.setScenery("stone", "🪨", usable, d.curRepo != "")
-	d.setScenery("gear", "⚙", usable, act == "tool_running")
-	d.setScenery("file", "📄", usable, act == "tool_running" && d.curFile != "")
-	sc := make([]world.Scenery, 0, len(d.sceneryM))
-	for _, s := range d.sceneryM {
-		if s.Pos >= 0 && s.Pos < usable {
-			sc = append(sc, *s)
-		}
-	}
-
-	// Ambient caption (yard+), rotated every ~15s.
-	ambient := ""
-	if usable >= 24 {
-		if nowMs > d.ambientUntil {
-			d.ambientIdx++
-			d.ambientUntil = nowMs + 15000
-		}
-		ambient = d.ambientText(hour)
-	}
-	return sc, ambient
-}
-
-// pickTarget chooses the dog's next destination (pet-world §3): a SHORT local
-// hop — a few columns from where it stands — within a central band that keeps it
-// off the walls. Short hops are the point: a target picked anywhere on the line
-// makes the dog traverse the whole width at 1 col/sec, which reads as the world
-// scrolling past and ends with the dog parked at an edge. Local drift reads as
-// the dog pottering/sniffing around one area. While a tool runs, the hop is
-// biased toward the ⚙ so the dog drifts over to watch the work.
-func (d *Daemon) pickTarget(maxPos, pos int, act string) int {
-	margin := maxPos / 6
-	if margin < 2 {
-		margin = 2
-	}
-	lo, hi := margin, maxPos-margin
-	if lo >= hi {
-		return maxPos / 2 // world too narrow for a band — just sit centre
-	}
-	dir := 1
-	if d.worldRng.Intn(2) == 0 {
-		dir = -1
-	}
-	if act == "tool_running" { // drift toward the tool the dog is watching
-		if g, ok := d.sceneryM["gear"]; ok && g.Pos != pos {
-			if g.Pos < pos {
-				dir = -1
-			} else {
-				dir = 1
-			}
-		}
-	}
-	t := pos + dir*(3+d.worldRng.Intn(8)) // a 3-10 column hop
-	if t < lo {
-		t = lo
-	}
-	if t > hi {
-		t = hi
-	}
-	return t
-}
-
-func clampTo(pos, maxPos int) int {
-	if pos < 0 {
-		return 0
-	}
-	if pos > maxPos {
-		return maxPos
-	}
-	return pos
-}
-
-// setScenery spawns a kind once (at a free column) when wanted, removes it when not.
-func (d *Daemon) setScenery(kind, glyph string, usable int, want bool) {
-	if !want {
-		if _, ok := d.sceneryM[kind]; ok {
-			dbgf("  scenery DESPAWN t=%d kind=%s", d.tickN, kind)
-		}
-		delete(d.sceneryM, kind)
-		return
-	}
-	if _, ok := d.sceneryM[kind]; !ok {
-		pos := d.freeCol(usable)
-		d.sceneryM[kind] = &world.Scenery{Glyph: glyph, Pos: pos}
-		dbgf("  scenery SPAWN t=%d kind=%s glyph=%s pos=%d dogPos=%d", d.tickN, kind, glyph, pos, d.pos)
-	} else {
-		d.sceneryM[kind].Glyph = glyph
-	}
-}
-
-// freeCol picks a column biased away from the dog and other scenery.
-func (d *Daemon) freeCol(usable int) int {
-	for try := 0; try < 8; try++ {
-		c := d.worldRng.Intn(usable)
-		if abs(c-d.pos) < 4 {
-			continue
-		}
-		clash := false
-		for _, s := range d.sceneryM {
-			if abs(c-s.Pos) < 2 {
-				clash = true
-				break
-			}
-		}
-		if !clash {
-			return c
-		}
-	}
-	return d.worldRng.Intn(usable)
-}
-
-// ambientText returns the current rotating caption (factual, lowercase).
-func (d *Daemon) ambientText(hour int) string {
-	var opts []string
-	if d.filesCount > 0 {
-		opts = append(opts, fmt.Sprintf("%d files this session", d.filesCount))
-	}
-	if streak := d.recent.ConsecutiveDays(d.lastEventTS); streak >= 2 {
-		opts = append(opts, fmt.Sprintf("%d-day streak", streak))
-	}
-	if hour < 5 || hour >= 23 {
-		opts = append(opts, "late one")
-	}
-	if d.curRepo != "" {
-		opts = append(opts, "in "+d.curRepo)
-	}
-	if len(opts) == 0 {
-		return ""
-	}
-	return opts[d.ambientIdx%len(opts)]
-}
-
-// trackSubagents maintains the robot companions from open Agent calls, writing
-// subagents.json. New ones spawn to the right of the dog; finished ones show a
-// fading face for a few seconds, then leave.
-func (d *Daemon) trackSubagents(nowMs int64, usable int) {
+// trackSubagents maintains the agent companions from open Agent calls, writing
+// subagents.json for the renderer to show beside the dog. Finished ones show a
+// fading face for a few seconds, then leave. No positioning — the renderer lays
+// them out inline.
+func (d *Daemon) trackSubagents(nowMs int64) {
 	open := map[string]bool{}
 	for _, id := range d.cls.OpenAgentIDs() {
 		open[id] = true
 	}
-	n := 0
 	for id := range open {
 		if _, ok := d.subs[id]; !ok {
-			d.subs[id] = &state.Subagent{
-				ID: id, Status: "running", Variant: variantOf(id),
-				Pos: d.pos + 9 + n*4, SinceMs: nowMs,
-			}
+			d.subs[id] = &state.Subagent{ID: id, Status: "running", Variant: variantOf(id), SinceMs: nowMs}
 		}
-		n++
 	}
 	for id, s := range d.subs {
 		if !open[id] {
@@ -931,9 +702,6 @@ func (d *Daemon) trackSubagents(nowMs int64, usable int) {
 	}
 	subs := make([]state.Subagent, 0, len(d.subs))
 	for _, s := range d.subs {
-		if usable > 0 && s.Pos >= usable {
-			s.Pos = usable - 1
-		}
 		subs = append(subs, *s)
 	}
 	_ = state.WriteSubagents(d.cfg.SubagentsPath(), subs)
@@ -945,13 +713,6 @@ func variantOf(id string) int {
 		sum += int(id[i])
 	}
 	return sum % 3
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
 
 // hasKindWords reports whether a prompt contains praise/thanks aimed at the pet

@@ -88,12 +88,12 @@ func TestRun_MissingNow_NeverErrors(t *testing.T) {
 	}
 }
 
-// High stress (idle) renders the distressed face (eyes >ᴥ<).
+// High stress (idle) renders the distressed face (eyes > ᴥ <).
 func TestRun_DistressedFace(t *testing.T) {
 	dir := t.TempDir()
 	writeNow(t, dir, `{"mood":{"stress":0.95},"activity":"idle"}`)
 	out := Run(nil, config.Config{StateDir: dir})
-	if !strings.Contains(out, ">ᴥ<") {
+	if !strings.Contains(out, "> ᴥ <") {
 		t.Errorf("want distressed dog, got %q", out)
 	}
 }

@@ -8,7 +8,6 @@ import (
 
 	"ccmagotchi/internal/config"
 	"ccmagotchi/internal/state"
-	"ccmagotchi/internal/world"
 )
 
 func TestIsActiveEvent(t *testing.T) {
@@ -266,39 +265,14 @@ func TestTick_DecorationSparkleOnTestPass(t *testing.T) {
 	}
 }
 
-// World: with a known terminal width, the daemon places the dog at a column and
-// spawns at least the edge-anchored sun/moon scenery.
-func TestTick_World(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := config.Config{StateDir: tmp + "/state"}
-	cfg.EnsureStateDir()
-	tr := tmp + "/t.jsonl"
-	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
-	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr, Cols: 120})
-
-	d := New(cfg)
-	d.Tick()
-	d.Tick()
-	n, _ := state.ReadNow(cfg.NowPath())
-	if len(n.Scenery) == 0 {
-		t.Error("a wide terminal should have scenery (at least the sun/moon)")
-	}
-	if n.Heading == "" {
-		t.Error("heading should be set in the world")
-	}
-	if n.Pos < 0 || n.Pos > 90 {
-		t.Errorf("dog position should be within usable width, got %d", n.Pos)
-	}
-}
-
-// World: a running subagent becomes a robot in subagents.json.
+// A running subagent becomes a companion in subagents.json (shown beside the dog).
 func TestTick_SubagentRobot(t *testing.T) {
 	tmp := t.TempDir()
 	cfg := config.Config{StateDir: tmp + "/state"}
 	cfg.EnsureStateDir()
 	tr := tmp + "/t.jsonl"
 	os.WriteFile(tr, []byte(`{"type":"user","timestamp":"2026-05-31T00:00:00.000Z","message":{"role":"user","content":"x"}}`+"\n"), 0o644)
-	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr, Cols: 120})
+	state.WriteSession(cfg.SessionPath(), state.Session{TranscriptPath: tr})
 
 	d := New(cfg)
 	d.Tick()
@@ -328,36 +302,6 @@ func TestOwnsLock(t *testing.T) {
 	os.Remove(p)
 	if ownsLock(p) {
 		t.Error("no lock file → does not own the lock")
-	}
-}
-
-// pet-world §3: the dog drifts in SHORT local hops within a central band (never
-// to the walls), and biases toward the ⚙ while a tool runs.
-func TestPickTarget_LocalDriftAndGear(t *testing.T) {
-	tmp := t.TempDir()
-	cfg := config.Config{StateDir: tmp + "/state"}
-	cfg.EnsureStateDir()
-	d := New(cfg)
-	// idle drift from mid-band: short hops (±10) that never hit a wall.
-	for i := 0; i < 60; i++ {
-		got := d.pickTarget(60, 30, "idle") // band [10,50]
-		if got == 0 || got == 60 {
-			t.Errorf("idle drift must avoid the walls, got %d", got)
-		}
-		if got < 20 || got > 40 {
-			t.Errorf("an idle hop from 30 should be local (±10), got %d", got)
-		}
-	}
-	// while a tool runs, hops bias toward the ⚙ (here to the right of the dog).
-	d.sceneryM["gear"] = &world.Scenery{Glyph: "⚙", Pos: 50}
-	for i := 0; i < 30; i++ {
-		got := d.pickTarget(60, 20, "tool_running")
-		if got <= 20 {
-			t.Errorf("during a tool the dog should drift toward the ⚙ (right of 20), got %d", got)
-		}
-		if got-20 > 10 {
-			t.Errorf("a hop should stay short (≤10), got %d from 20", got)
-		}
 	}
 }
 

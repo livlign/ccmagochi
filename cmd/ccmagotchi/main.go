@@ -12,7 +12,6 @@ import (
 	"ccmagotchi/internal/daemon"
 	"ccmagotchi/internal/render"
 	"ccmagotchi/internal/state"
-	"ccmagotchi/internal/world"
 )
 
 func main() {
@@ -77,10 +76,8 @@ func prepare(stdin []byte, cfg config.Config) {
 		cwd = in.Workspace.CurrentDir // CC variants expose one or the other
 	}
 	if in.TranscriptPath != "" {
-		// COLUMNS is a renderer-only env var; pass it to the daemon (which has no
-		// terminal) so it can bound the dog's movement + scenery to the world width.
 		_ = state.WriteSession(cfg.SessionPath(), state.Session{
-			TranscriptPath: in.TranscriptPath, SessionID: in.SessionID, Cwd: cwd, Cols: world.Cols(),
+			TranscriptPath: in.TranscriptPath, SessionID: in.SessionID, Cwd: cwd,
 		})
 	}
 	daemon.EnsureRunning(cfg)

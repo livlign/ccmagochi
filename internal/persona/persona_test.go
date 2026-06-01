@@ -8,17 +8,17 @@ import (
 
 func TestLoad_DefaultsWhenMissing(t *testing.T) {
 	p := Load(filepath.Join(t.TempDir(), "none.json"))
-	if p.RemarkCap != Default().RemarkCap {
-		t.Fatalf("missing file should yield defaults, got cap=%d", p.RemarkCap)
+	if p.CooldownTurns != Default().CooldownTurns {
+		t.Fatalf("missing file should yield defaults, got cooldown=%d", p.CooldownTurns)
 	}
 }
 
 func TestLoad_OverrideKeepsOtherDefaults(t *testing.T) {
 	fp := filepath.Join(t.TempDir(), "persona.json")
-	os.WriteFile(fp, []byte(`{"remark_cap":2}`), 0o644)
+	os.WriteFile(fp, []byte(`{"cooldown_turns":2}`), 0o644)
 	p := Load(fp)
-	if p.RemarkCap != 2 {
-		t.Fatalf("override failed: %d", p.RemarkCap)
+	if p.CooldownTurns != 2 {
+		t.Fatalf("override failed: %d", p.CooldownTurns)
 	}
 	if p.ManyFiles != Default().ManyFiles {
 		t.Fatalf("unspecified key should keep default, got %d", p.ManyFiles)

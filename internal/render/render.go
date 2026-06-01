@@ -8,13 +8,15 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"ccmagotchi/internal/config"
 	"ccmagotchi/internal/face"
 	"ccmagotchi/internal/state"
-	"ccmagotchi/internal/world"
 )
 
 // Run composes the output Claude Code shows: the pet line and the user's
@@ -34,9 +36,11 @@ func Run(stdin []byte, cfg config.Config) string {
 	return pet + "\n" + base // default: pet on the first line, base below
 }
 
-// petLine reads now.json, renders the dog (+ remark), then composes it into its
-// world (scenery, ambient text, subagent robots) at the current terminal width.
-// Never errors: a missing state file shows a neutral idle dog.
+// petLine reads now.json, renders the dog (+ remark), and appends the active
+// subagent companions when Claude is delegating. The dog always renders at the
+// start of the line — no positioning, so it shows identically in every session
+// regardless of terminal width. Never errors: a missing state file shows a
+// neutral idle dog.
 func petLine(cfg config.Config) string {
 	n, err := state.ReadNow(cfg.NowPath())
 	if err != nil {
@@ -46,49 +50,48 @@ func petLine(cfg config.Config) string {
 	if n.Remark != nil {
 		remark = n.Remark.Text
 	}
-	// Walking and talking can't share one narrow line, so they take turns: while
-	// the dog is traveling (heading left/right) it stays quiet and walks through
-	// its world; it talks only once it has stopped (heading still — arrived or
-	// resting). This keeps movement visible instead of being masked by speech
-	// every frame (pet-world §5).
-	moving := n.Heading == "left" || n.Heading == "right"
-	if moving {
-		remark = ""
-	}
 	tick := time.Now().Unix()
 	// Transition smoothing (pet-01-dog §14): the renderer is a fresh process each
 	// refresh, so the previous frame's signature is persisted and handed back so a
-	// state change is masked by one intermediate frame (blink / dot / still).
+	// state change is masked by one intermediate frame (blink / dot).
 	prev := readFrame(cfg.FramePath())
 	dog, cur := face.PickFrame(n, tick, remark, prev)
 	writeFrame(cfg.FramePath(), cur)
-	cols := world.Cols()
 	if remark != "" {
-		// Stopped and talking: the speech occupies the line; scenery and ambient
-		// yield to it. The dog still renders at its column (Compose clamps it
-		// leftward so the speech fits).
-		return world.Compose(cols, dog, n.Pos, nil, nil, 0, "")
+		return dog // the spoken sentence is the whole line; no companions beside it
 	}
+	return dog + subagentTag(cfg)
+}
 
+const (
+	maxRobots = 3 // agent faces shown inline before the count carries the rest
+	dimAnsi   = "\x1b[2;37m"
+	reset     = "\x1b[0m"
+)
+
+// subagentTag renders the agent companions beside the dog while Claude is
+// delegating: up to maxRobots agent faces plus a dim count of how many are
+// active ("[◉_◉] [◦_◦] ·2"). Empty when nothing is delegating. The whole tag is
+// dimmed so the dog stays the focus.
+func subagentTag(cfg config.Config) string {
 	subs := state.ReadSubagents(cfg.SubagentsPath())
-	maxR := world.MaxRobots(cols)
-	var robots []world.Item
-	overflow := 0
-	for i, s := range subs {
-		if i < maxR {
-			f := robotFace(s)
-			robots = append(robots, world.Item{Col: s.Pos, W: world.Width(f), S: f})
-		} else {
-			overflow++
-		}
+	if len(subs) == 0 {
+		return ""
 	}
-	return world.Compose(cols, dog, n.Pos, n.Scenery, robots, overflow, n.Ambient)
+	sort.Slice(subs, func(i, j int) bool { return subs[i].SinceMs < subs[j].SinceMs }) // stable: oldest first
+	var faces strings.Builder
+	for i, s := range subs {
+		if i >= maxRobots {
+			break
+		}
+		faces.WriteString(robotFace(s) + " ")
+	}
+	return " " + dimAnsi + faces.String() + "·" + strconv.Itoa(len(subs)) + reset
 }
 
 // robotFace renders a subagent companion — mechanical contrast to the dog:
-// square brackets, dot eyes, no snout/tail/bark. It renders in PLAIN terminal
-// style with no badge (pet-world §6) — the contrast between the framed white-bg
-// dog and these unframed brackets is what reads as biological vs mechanical.
+// square brackets, dot eyes, no snout/tail/bark. The contrast between the framed
+// white-bg dog and these unframed brackets reads as biological vs mechanical.
 var robotEyes = []string{"◉", "◦", "·"} // variants so concurrent robots differ
 
 func robotFace(s state.Subagent) string {
@@ -135,7 +138,11 @@ func baseLines(stdin []byte, cfg config.Config) string {
 	if strings.TrimSpace(cfg.BaseStatusCommand) == "" {
 		return ""
 	}
-	cmd := exec.Command("sh", "-c", cfg.BaseStatusCommand) // Phase 5: Windows variant
+	shell, flag := "sh", "-c"
+	if runtime.GOOS == "windows" {
+		shell, flag = "cmd", "/c"
+	}
+	cmd := exec.Command(shell, flag, cfg.BaseStatusCommand)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var out bytes.Buffer
 	cmd.Stdout = &out
